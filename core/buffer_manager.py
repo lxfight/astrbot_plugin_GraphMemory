@@ -19,10 +19,15 @@ class BufferMessage:
     content: str  # 纯文本内容
     timestamp: float  # 时间戳
     role: str  # 角色: user 或 assistant
+    is_group: bool = False
 
     def to_log_str(self) -> str:
         """转化为 LLM 易读的格式: [role:name:id]:content"""
-        return f"[{self.role}:{self.sender_name}:{self.sender_id}]: {self.content}"
+        prefix = f"[{self.role}:{self.sender_name}:{self.sender_id}]"
+        if self.is_group:
+             # 如果是群聊，加上(Group)标识
+             prefix = f"[{self.role}:{self.sender_name}:{self.sender_id}]"
+        return f"{prefix}: {self.content}"
 
 
 class SessionBuffer:
@@ -30,6 +35,7 @@ class SessionBuffer:
         self.session_id = session_id
         self.max_size = max_size
         self.max_seconds = max_seconds
+        self.is_group = False # 标记该会话是否为群聊
 
         self._buffer: list[BufferMessage] = []
         self._last_flush_time = time.time()
@@ -41,6 +47,10 @@ class SessionBuffer:
         """
         self._buffer.append(message)
         self._last_activity_time = time.time()
+        
+        # 更新会话属性
+        if message.is_group:
+            self.is_group = True
 
         # 检查是否达到条数限制
         if len(self._buffer) >= self.max_size:
@@ -78,9 +88,9 @@ class SessionBuffer:
 
 
 # 定义回调函数类型：当缓冲区flush时调用此函数处理文本
-# (session_id, text_content) -> None
+# (session_id, text_content, is_group) -> None
 # 使用 Coroutine 以满足 asyncio.create_task 的类型检查
-FlushCallback = Callable[[str, str], Coroutine[Any, Any, None]]
+FlushCallback = Callable[[str, str, bool], Coroutine[Any, Any, None]]
 
 
 class BufferManager:
@@ -142,12 +152,15 @@ class BufferManager:
         # 使用 get_message_outline 获取包含占位符的消息内容
         content = event.get_message_outline()
 
+        is_group = bool(event.get_group_id())
+        
         msg = BufferMessage(
             sender_id=event.get_sender_id(),
             sender_name=event.get_sender_name(),
             content=content,
             timestamp=time.time(),
             role="user",
+            is_group=is_group
         )
         await self._push_to_buffer(session_id, msg)
 
@@ -194,8 +207,9 @@ class BufferManager:
             logger.debug(
                 f"[GraphMemory Buffer] Session {session_id} hit size limit ({self.max_size}). Flushing."
             )
+            is_group = buffer.is_group
             text = buffer.flush()
-            await self.flush_callback(session_id, text)
+            await self.flush_callback(session_id, text, is_group)
 
     async def _time_checker(self):
         """后台任务：每隔一段时间检查是否有超时的缓冲区"""
@@ -210,10 +224,11 @@ class BufferManager:
                         logger.debug(
                             f"[GraphMemory Buffer] Session {session_id} hit time limit. Flushing."
                         )
+                        is_group = buffer.is_group
                         text = buffer.flush()
                         if text:
                             # 异步调用 callback，避免阻塞检查循环
-                            asyncio.create_task(self.flush_callback(session_id, text))
+                            asyncio.create_task(self.flush_callback(session_id, text, is_group))
             except Exception as e:
                 logger.error(f"[GraphMemory Buffer] Timer loop error: {e}")
 
@@ -224,6 +239,7 @@ class BufferManager:
 
         # 可选：关闭时将所有残留消息强制 Flush
         for session_id, buffer in self.buffers.items():
+            is_group = buffer.is_group
             text = buffer.flush()
             if text:
-                await self.flush_callback(session_id, text)
+                await self.flush_callback(session_id, text, is_group)
