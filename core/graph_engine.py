@@ -40,13 +40,18 @@ class GraphEngine:
                     session_id STRING,
                     persona_id STRING,
                     attributes STRING,
+                    last_mentioned_at INT64,
                     updated_at INT64,
                     PRIMARY KEY (id)
                 )
             """)
             logger.info("[GraphMemory] Created node table 'Entity'.")
         except RuntimeError:
-            pass
+            # 尝试添加新字段 (简单的迁移策略)
+            try:
+                self.conn.execute("ALTER TABLE Entity ADD last_mentioned_at INT64 DEFAULT 0")
+            except RuntimeError:
+                pass
 
         # 2. 关系表
         try:
@@ -55,12 +60,19 @@ class GraphEngine:
                     FROM Entity TO Entity,
                     relation STRING,
                     weight DOUBLE,
+                    confidence DOUBLE,
+                    source_user STRING,
                     updated_at INT64
                 )
             """)
             logger.info("[GraphMemory] Created relationship table 'Related'.")
         except RuntimeError:
-            pass
+            # 尝试添加新字段
+            try:
+                self.conn.execute("ALTER TABLE Related ADD confidence DOUBLE DEFAULT 1.0")
+                self.conn.execute("ALTER TABLE Related ADD source_user STRING DEFAULT 'unknown'")
+            except RuntimeError:
+                pass
 
     def _gen_pk(self, name: str, session_id: str, persona_id: str) -> str:
         """
@@ -90,6 +102,9 @@ class GraphEngine:
         src_type: str = "entity",
         tgt_type: str = "entity",
         attributes: dict | None = None,
+        weight: float = 1.0,
+        confidence: float = 1.0,
+        source_user: str = "unknown",
     ):
         """
         添加三元组 (幂等操作: 存在则更新，不存在则创建)
@@ -109,9 +124,11 @@ class GraphEngine:
                 ON CREATE SET
                     a.name = $name, a.type = $type,
                     a.session_id = $sid, a.persona_id = $pid,
-                    a.attributes = $attr, a.updated_at = $now
+                    a.attributes = $attr, a.updated_at = $now,
+                    a.last_mentioned_at = $now
                 ON MATCH SET
-                    a.updated_at = $now
+                    a.updated_at = $now,
+                    a.last_mentioned_at = $now
             """,
                 {
                     "id": src_id,
@@ -130,9 +147,11 @@ class GraphEngine:
                 ON CREATE SET
                     b.name = $name, b.type = $type,
                     b.session_id = $sid, b.persona_id = $pid,
-                    b.updated_at = $now
+                    b.updated_at = $now,
+                    b.last_mentioned_at = $now
                 ON MATCH SET
-                    b.updated_at = $now
+                    b.updated_at = $now,
+                    b.last_mentioned_at = $now
             """,
                 {
                     "id": tgt_id,
@@ -148,10 +167,24 @@ class GraphEngine:
                 """
                 MATCH (a:Entity {id: $src_id}), (b:Entity {id: $tgt_id})
                 MERGE (a)-[r:Related {relation: $rel}]->(b)
-                ON CREATE SET r.weight = 1.0, r.updated_at = $now
-                ON MATCH SET r.weight = r.weight + 0.5, r.updated_at = $now
+                ON CREATE SET
+                    r.weight = $weight,
+                    r.confidence = $conf,
+                    r.source_user = $src_user,
+                    r.updated_at = $now
+                ON MATCH SET
+                    r.weight = r.weight + $weight,
+                    r.updated_at = $now
             """,
-                {"src_id": src_id, "tgt_id": tgt_id, "rel": relation, "now": now},
+                {
+                    "src_id": src_id,
+                    "tgt_id": tgt_id,
+                    "rel": relation,
+                    "now": now,
+                    "weight": weight,
+                    "conf": confidence,
+                    "src_user": source_user
+                },
             )
         except Exception as e:
             logger.error(f"[GraphMemory] Failed to add triplet: {e}")
