@@ -14,5 +14,18 @@
     "description": "记忆采纳的置信度阈值 (0.0 - 1.0)。低于此置信度的关系将被丢弃。",
     "type": "float",
     "default": 0.6
+  },
+  "enable_persona_isolation": {
+    "description": "是否默认开启人格记忆隔离。开启后，不同人格的记忆相互独立。",
+    "type": "bool",
+    "default": true
+  },
+  "persona_isolation_exceptions": {
+    "description": "人格隔离例外列表。如果开启了默认隔离，此列表中的会话将共享记忆（不隔离）；如果关闭了默认隔离，此列表中的会话将开启隔离。填写 unified_msg_origin。",
+    "type": "list",
+    "items": {
+      "type": "string"
+    },
+    "default": []
   }
 }
