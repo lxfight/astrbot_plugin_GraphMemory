@@ -13,6 +13,7 @@ logger = logging.getLogger("GraphMemory.Extractor")
 try:
     import jieba
     import jieba.analyse
+    import jieba.posseg as pseg
 
     JIEBA_AVAILABLE = True
 except ImportError:
@@ -32,6 +33,10 @@ class Triplet:
     weight: float = 1.0
     confidence: float = 1.0
     source_user: str = "unknown"  # Who provided this info
+
+    # 实体重要性 (0.0 - 1.0)，用于遗忘机制
+    src_importance: float = 0.5
+    tgt_importance: float = 0.5
 
 
 class KnowledgeExtractor:
@@ -111,13 +116,22 @@ class KnowledgeExtractor:
 
             triplets = []
             for item in data:
+                src = item.get("src", "")
+                tgt = item.get("tgt", "")
+
+                # 计算重要性
+                src_imp = self._calculate_importance(src)
+                tgt_imp = self._calculate_importance(tgt)
+
                 triplets.append(
                     Triplet(
-                        src=item.get("src", ""),
+                        src=src,
                         rel=item.get("rel", ""),
-                        tgt=item.get("tgt", ""),
+                        tgt=tgt,
                         confidence=item.get("confidence", 1.0),
                         source_user=item.get("source_user", "unknown"),
+                        src_importance=src_imp,
+                        tgt_importance=tgt_imp,
                     )
                 )
 
@@ -129,6 +143,58 @@ class KnowledgeExtractor:
         except Exception as e:
             logger.error(f"[GraphMemory] LLM extraction error: {e}", exc_info=True)
             return []
+
+    def _calculate_importance(self, text: str) -> float:
+        """
+        [Local NLP] 计算实体重要性 (0.0 - 1.0)
+        基于 jieba.posseg 词性标注。
+        """
+        if not text or not JIEBA_AVAILABLE:
+            return 0.5  # Default
+
+        try:
+            # 取第一个词的词性作为整体词性
+            # 或者取 text 中所有词的最高权重
+            words = list(pseg.cut(text))
+            max_score = 0.5
+
+            # 词性权重映射
+            # nr: 人名 (0.9)
+            # ns: 地名 (0.8)
+            # nz: 其他专名 (0.8)
+            # nt: 机构团体 (0.8)
+            # n: 名词 (0.6)
+            # v: 动词 (0.3)
+            # a: 形容词 (0.3)
+            # r: 代词 (0.1)
+            pos_weights = {
+                "nr": 0.9,
+                "nrfg": 0.9,
+                "nrt": 0.9,
+                "ns": 0.8,
+                "nsf": 0.8,
+                "nt": 0.8,
+                "nz": 0.8,
+                "n": 0.6,
+                "v": 0.3,
+                "vd": 0.3,
+                "vn": 0.4,
+                "a": 0.3,
+                "ad": 0.3,
+                "an": 0.4,
+                "r": 0.2,
+            }
+
+            for w, flag in words:
+                score = pos_weights.get(flag, 0.5)  # 默认 0.5
+                if score > max_score:
+                    max_score = score
+
+            return max_score
+
+        except Exception as e:
+            logger.warning(f"[GraphMemory] Failed to calc importance for '{text}': {e}")
+            return 0.5
 
     async def extract_keywords(self, query: str) -> list[str]:
         """

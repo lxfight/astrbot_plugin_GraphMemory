@@ -1,3 +1,5 @@
+import asyncio
+
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.provider import ProviderRequest
@@ -43,12 +45,19 @@ class GraphMemory(Star):
             self.config.get("persona_isolation_exceptions", [])
         )
 
+        # 记忆修剪配置
+        self.max_global_nodes = self.config.get("max_global_nodes", 5000)
+        self.prune_interval = self.config.get("prune_interval", 3600)
+
         # 初始化存储路径
         plugin_data_path = StarTools.get_data_dir()
         logger.debug(f"[GraphMemory] Plugin data path: {plugin_data_path}")
 
         # 初始化图数据库引擎
         self.graph_engine = GraphEngine(plugin_data_path)
+
+        # 启动维护任务 (清理 + Lazy Update)
+        self._maintenance_task = asyncio.create_task(self._maintenance_loop())
 
         # 初始化提取器
         self.extractor = KnowledgeExtractor(
@@ -114,6 +123,8 @@ class GraphMemory(Star):
                 weight=t.weight,
                 confidence=t.confidence,
                 source_user=t.source_user,
+                src_importance=t.src_importance,
+                tgt_importance=t.tgt_importance,
             )
             count += 1
 
@@ -180,12 +191,51 @@ class GraphMemory(Star):
         )
         yield event.plain_result(f"Memory migrated from {old_sid} to {new_sid}")
 
+    async def _maintenance_loop(self):
+        """
+        后台维护循环：定期清理 + 频繁 Flush Access Stats
+        """
+        # 分离两个间隔：prune (很久一次) 和 flush_stats (频繁)
+        prune_counter = 0
+        flush_interval = 60  # 每分钟回写一次访问统计
+
+        while True:
+            try:
+                await asyncio.sleep(flush_interval)
+
+                # 1. Flush Access Stats
+                self.graph_engine.flush_access_stats()
+
+                # 2. Check Pruning
+                prune_counter += flush_interval
+                if prune_counter >= self.prune_interval:
+                    prune_counter = 0
+                    self.graph_engine.prune_graph(
+                        max_nodes=self.max_global_nodes,
+                        retention_weights={
+                            "recency": 0.4,
+                            "frequency": 0.3,
+                            "importance": 0.3,
+                        },
+                    )
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"[GraphMemory] Maintenance loop error: {e}")
+
     async def terminate(self):
         """
         AstrBot 生命周期钩子：插件卸载或 Bot 停止时调用。
         用于清理数据库连接等资源。
         """
         logger.info("[GraphMemory] Terminating GraphMemoryPlugin...")
+
+        if hasattr(self, "_maintenance_task"):
+            self._maintenance_task.cancel()
+            # 退出前最后一次 Flush
+            if hasattr(self, "graph_engine"):
+                self.graph_engine.flush_access_stats()
 
         if hasattr(self, "buffer_manager"):
             await self.buffer_manager.shutdown()
@@ -227,7 +277,7 @@ class GraphMemory(Star):
 
     async def _resolve_persona_id_for_session(self, session_id: str) -> str:
         """
-        [Helper] 在没有 event 的情况下解析 session_id 的 persona_id
+        在没有 event 的情况下解析 session_id 的 persona_id
         """
         # 逻辑同 _get_persona_id，只是入参不同
         should_isolate = self.enable_persona_isolation

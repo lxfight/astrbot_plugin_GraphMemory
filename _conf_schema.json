@@ -39,5 +39,15 @@
     "type": "string",
     "default": "",
     "_special": "select_provider"
+  },
+  "max_global_nodes": {
+    "description": "全局最大节点数限制。当节点总数超过此值时，会触发清理机制，删除最旧且不重要的节点。",
+    "type": "int",
+    "default": 5000
+  },
+  "prune_interval": {
+    "description": "记忆清理检查间隔（秒）。",
+    "type": "int",
+    "default": 3600
   }
 }
