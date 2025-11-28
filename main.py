@@ -4,6 +4,7 @@ from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core import GraphEngine
+from .core.buffer_manager import BufferManager
 
 
 @register(
@@ -28,6 +29,24 @@ class GraphMemory(Star):
         # 初始化图数据库引擎
         self.graph_engine = GraphEngine(plugin_data_path)
 
+        # 初始化缓冲区管理器
+        self.buffer_manager = BufferManager(
+            flush_callback=self._handle_buffer_flush,
+            max_size=10,
+            max_wait_seconds=60
+        )
+
+    async def _handle_buffer_flush(self, session_id: str, text: str):
+        """
+        缓冲区刷新回调：处理累积的对话文本
+        """
+        logger.info(f"[GraphMemory] Flushing buffer for {session_id}, length: {len(text)}")
+        # TODO: 调用 LLM 提取三元组
+        # triples = await self.llm_extract(text)
+        # for src, rel, tgt in triples:
+        #     self.graph_engine.add_triplet(src, rel, tgt, session_id)
+        pass
+
     @filter.on_llm_request()
     async def inject_memory(self, event: AstrMessageEvent, req: ProviderRequest):
         """在 LLM 请求前，检索记忆并注入到 Prompt"""
@@ -45,18 +64,15 @@ class GraphMemory(Star):
             # 注入到 System Prompt
             req.system_prompt += f"\n\n[Graph Memory Context]\n{memory_text}\n(Reference these relationships if relevant.)"
 
+    @filter.event_message_type(filter.EventMessageType.ALL)
+    async def on_user_message(self, event: AstrMessageEvent):
+        """监听用户消息"""
+        await self.buffer_manager.add_user_message(event)
+
     @filter.after_message_sent()
     async def save_memory(self, event: AstrMessageEvent):
-        """
-        消息发送后，异步将对话转化为图谱数据。
-        注意：此处省略了调用 LLM 进行三元组提取的代码 (Extract Triplets)。
-        """
-        # session_id = event.unified_msg_origin
-        # persona_id = await self._get_persona_id(event)
-        # triples = await self.llm_extract(event.message_str)
-        # for src, rel, tgt in triples:
-        #     self.engine.add_triplet(src, rel, tgt, session_id, persona_id)
-        pass
+        """监听 Bot 发送的消息"""
+        await self.buffer_manager.add_bot_message(event)
 
     @filter.command("migrate_memory")
     async def cmd_migrate(self, event: AstrMessageEvent, target_session: str):
@@ -76,6 +92,10 @@ class GraphMemory(Star):
         用于清理数据库连接等资源。
         """
         logger.info("[GraphMemory] Terminating GraphMemoryPlugin...")
+
+        if hasattr(self, "buffer_manager"):
+            await self.buffer_manager.shutdown()
+
         if hasattr(self, "graph_engine"):
             self.graph_engine.close()
 
