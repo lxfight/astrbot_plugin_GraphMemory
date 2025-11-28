@@ -19,14 +19,12 @@ class BufferMessage:
     content: str  # 纯文本内容
     timestamp: float  # 时间戳
     role: str  # 角色: user 或 assistant
+    persona_id: str  # 消息所属的人格ID
     is_group: bool = False
 
     def to_log_str(self) -> str:
         """转化为 LLM 易读的格式: [role:name:id]:content"""
         prefix = f"[{self.role}:{self.sender_name}:{self.sender_id}]"
-        if self.is_group:
-            # 如果是群聊，加上(Group)标识
-            prefix = f"[{self.role}:{self.sender_name}:{self.sender_id}]"
         return f"{prefix}: {self.content}"
 
 
@@ -35,7 +33,9 @@ class SessionBuffer:
         self.session_id = session_id
         self.max_size = max_size
         self.max_seconds = max_seconds
-        self.is_group = False  # 标记该会话是否为群聊
+        
+        self.is_group = False # 标记该会话是否为群聊
+        self.current_persona_id: str | None = None # 记录当前Buffer所属的人格ID
 
         self._buffer: list[BufferMessage] = []
         self._last_flush_time = time.time()
@@ -45,12 +45,13 @@ class SessionBuffer:
         """
         添加消息，并返回是否应该立即触发提取 (Hit Size Limit)
         """
+        # 如果是该Buffer的第一条消息，记录状态
+        if not self._buffer:
+            self.current_persona_id = message.persona_id
+            self.is_group = message.is_group
+
         self._buffer.append(message)
         self._last_activity_time = time.time()
-
-        # 更新会话属性
-        if message.is_group:
-            self.is_group = True
 
         # 检查是否达到条数限制
         if len(self._buffer) >= self.max_size:
@@ -88,9 +89,9 @@ class SessionBuffer:
 
 
 # 定义回调函数类型：当缓冲区flush时调用此函数处理文本
-# (session_id, text_content, is_group) -> None
+# (session_id, text_content, is_group, persona_id) -> None
 # 使用 Coroutine 以满足 asyncio.create_task 的类型检查
-FlushCallback = Callable[[str, str, bool], Coroutine[Any, Any, None]]
+FlushCallback = Callable[[str, str, bool, str], Coroutine[Any, Any, None]]
 
 
 class BufferManager:
@@ -145,14 +146,13 @@ class BufferManager:
             parts.append(" ")
         return "".join(parts).strip()
 
-    async def add_user_message(self, event: AstrMessageEvent):
+    async def add_user_message(self, event: AstrMessageEvent, persona_id: str):
         """处理用户接收的消息"""
         session_id = self._get_session_key(event)
+        is_group = bool(event.get_group_id())
 
         # 使用 get_message_outline 获取包含占位符的消息内容
         content = event.get_message_outline()
-
-        is_group = bool(event.get_group_id())
 
         msg = BufferMessage(
             sender_id=event.get_sender_id(),
@@ -160,11 +160,12 @@ class BufferManager:
             content=content,
             timestamp=time.time(),
             role="user",
-            is_group=is_group,
+            persona_id=persona_id,
+            is_group=is_group
         )
         await self._push_to_buffer(session_id, msg)
 
-    async def add_bot_message(self, event: AstrMessageEvent):
+    async def add_bot_message(self, event: AstrMessageEvent, persona_id: str):
         """处理 Bot 发出的消息 (通过 after_message_sent 钩子)"""
         session_id = self._get_session_key(event)
 
@@ -184,12 +185,16 @@ class BufferManager:
         if not bot_content:
             return
 
+        # Bot 消息通常沿用会话属性，但为了严谨，我们认为 Bot 消息不改变群聊属性（因为它在同一个会话中）
+        # persona_id 应该由上层传入
         msg = BufferMessage(
             sender_id=event.message_obj.self_id,  # Bot 自己的 ID
             sender_name="Bot",
             content=bot_content,
             timestamp=time.time(),
             role="assistant",
+            persona_id=persona_id,
+            is_group=bool(event.get_group_id())
         )
         await self._push_to_buffer(session_id, msg)
 
@@ -201,15 +206,33 @@ class BufferManager:
             )
 
         buffer = self.buffers[session_id]
+
+        # 检查 Persona 是否发生变化 (Context Switch)
+        # 如果 buffer 中已有消息，且新消息的 persona_id 与 buffer 的 current_persona_id 不一致
+        if buffer.message_count > 0 and buffer.current_persona_id != msg.persona_id:
+             logger.debug(
+                f"[GraphMemory Buffer] Session {session_id} persona switch detected "
+                f"({buffer.current_persona_id} -> {msg.persona_id}). Flushing previous buffer."
+            )
+             # 强制 Flush 旧的 buffer
+             old_persona = buffer.current_persona_id
+             is_group = buffer.is_group
+             text = buffer.flush()
+             if text and old_persona: # 类型检查
+                 await self.flush_callback(session_id, text, is_group, old_persona)
+        
+        # 此时 buffer 为空（或者是新建的，或者是刚 flush 过的），add 会重置 current_persona_id
         should_flush = buffer.add(msg)
 
         if should_flush:
             logger.debug(
                 f"[GraphMemory Buffer] Session {session_id} hit size limit ({self.max_size}). Flushing."
             )
+            current_persona = buffer.current_persona_id
             is_group = buffer.is_group
             text = buffer.flush()
-            await self.flush_callback(session_id, text, is_group)
+            if text and current_persona:
+                await self.flush_callback(session_id, text, is_group, current_persona)
 
     async def _time_checker(self):
         """后台任务：每隔一段时间检查是否有超时的缓冲区"""
@@ -224,13 +247,14 @@ class BufferManager:
                         logger.debug(
                             f"[GraphMemory Buffer] Session {session_id} hit time limit. Flushing."
                         )
+                        # 保存状态用于回调
+                        persona_id = buffer.current_persona_id
                         is_group = buffer.is_group
+                        
                         text = buffer.flush()
-                        if text:
+                        if text and persona_id:
                             # 异步调用 callback，避免阻塞检查循环
-                            asyncio.create_task(
-                                self.flush_callback(session_id, text, is_group)
-                            )
+                            asyncio.create_task(self.flush_callback(session_id, text, is_group, persona_id))
             except Exception as e:
                 logger.error(f"[GraphMemory Buffer] Timer loop error: {e}")
 
@@ -241,7 +265,8 @@ class BufferManager:
 
         # 可选：关闭时将所有残留消息强制 Flush
         for session_id, buffer in self.buffers.items():
+            persona_id = buffer.current_persona_id
             is_group = buffer.is_group
             text = buffer.flush()
-            if text:
-                await self.flush_callback(session_id, text, is_group)
+            if text and persona_id:
+                await self.flush_callback(session_id, text, is_group, persona_id)
