@@ -15,10 +15,10 @@ from astrbot.api import logger
 
 class GraphEngine:
     def __init__(self, db_path: Path):
-        self.db_path = db_path
+        self.db_path = str(db_path)  # KuzuDB 接受字符串路径
 
         try:
-            os.makedirs(os.path.dirname(db_path), exist_ok=True)
+            os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         except OSError:
             pass
 
@@ -74,9 +74,9 @@ class GraphEngine:
         except RuntimeError:
             # Schema 变更策略: 尝试添加新列
             cols = [
-                ("last_accessed", "INT64", "0"),
-                ("access_count", "INT64", "0"),
-                ("importance", "DOUBLE", "0.5"),
+                ("last_accessed", "INT64", 0),
+                ("access_count", "INT64", 0),
+                ("importance", "DOUBLE", 0.5),
             ]
             for col_name, col_type, default_val in cols:
                 try:
@@ -429,16 +429,19 @@ class GraphEngine:
         if not node_ids:
             return
 
+        should_flush = False
         with self._lock:
             self._access_cache.update(node_ids)
             current_cache_size = len(self._access_cache)
             time_since_flush = time.time() - self._last_flush_time
 
-        # 双触发机制
-        if (
-            current_cache_size >= self._flush_threshold
-            or time_since_flush >= self._flush_interval
-        ):
+            if (
+                current_cache_size >= self._flush_threshold
+                or time_since_flush >= self._flush_interval
+            ):
+                should_flush = True
+
+        if should_flush:
             # 这里调用的是 sync 方法，因为 record_access 通常在 executor 线程中被 search_subgraph 调用
             self._flush_access_stats_sync()
 
@@ -647,14 +650,18 @@ class GraphEngine:
         old_sid = from_context.get("session_id", "")
         old_pid = from_context.get("persona_id", "")
 
-        new_sid = to_context.get("session_id", old_sid)
-        new_pid = to_context.get("persona_id", old_pid)
+        target_sid = to_context.get("session_id")
+        target_pid = to_context.get("persona_id")
 
-        if old_sid == new_sid and old_pid == new_pid:
+        if not target_sid and not target_pid:
+            # 没有任何目标，无法迁移
             return
 
+        # 如果没有指定 target_sid，则保留原来的 sid（虽然这种情况很少见）
+        # 如果没有指定 target_pid，则保留原来的 pid
+
         logger.info(
-            f"[GraphMemory] Start migrating graph memory from {old_sid}:{old_pid} to {new_sid}:{new_pid}"
+            f"[GraphMemory] Start migrating graph memory from {old_sid}:{old_pid} to {target_sid}:{target_pid}"
         )
 
         query_filter = []
@@ -669,10 +676,11 @@ class GraphEngine:
         where_clause = " AND ".join(query_filter) if query_filter else "true"
 
         # 1. 读取旧数据 (节点)
+        # 读取时多读一个 n.persona_id，以便在 target_pid 为空时保留原值
         nodes_res: Any = self.conn.execute(
             f"""
             MATCH (n:Entity) WHERE {where_clause}
-            RETURN n.name, n.type, n.attributes
+            RETURN n.name, n.type, n.attributes, n.persona_id
             """,
             params,
         )
@@ -682,16 +690,16 @@ class GraphEngine:
             nodes_data.append(nodes_res.get_next())
 
         # 1.5 读取旧数据 (边)
+        # 增加读取 confidence 和 source_user，保证数据完整性
         edges_res: Any = self.conn.execute(
             f"""
             MATCH (a:Entity)-[r:Related]->(b:Entity)
             WHERE {where_clause.replace("n.", "a.")}
             AND {where_clause.replace("n.", "b.")}
-            RETURN a.name, r.relation, b.name, r.weight
+            RETURN a.name, r.relation, b.name, r.weight, a.persona_id, b.persona_id, r.confidence, r.source_user
             """,
             params,
         )
-
         edges_data = []
         while edges_res.has_next():
             edges_data.append(edges_res.get_next())
@@ -701,16 +709,35 @@ class GraphEngine:
         )
 
         # 2. 写入新数据 (Clone)
-        for name, type_, attr_str in nodes_data:
+        for name, type_, attr_str, original_pid in nodes_data:
             attr = json.loads(attr_str or "{}")
-            self._force_create_node(name, new_sid, new_pid, type_, attr)
+            pid_to_use = target_pid if target_pid else original_pid
+            sid_to_use = target_sid if target_sid else old_sid
+            self._force_create_node(name, sid_to_use, pid_to_use, type_, attr)
 
-        for src, rel, tgt, weight in edges_data:
-            self._add_triplet_sync(src, rel, tgt, new_sid, new_pid)
-            # TODO 想严格保留原权重，这里其实应该写专门的 Cypher
-            # 但复用 add_triplet (默认+0.5) 对于聊天机器人记忆迁移通常是可以接受的，因为它代表"回忆"了一次
+        # 3. 写入新数据 (Clone Edges)
+        for src, rel, tgt, weight, src_pid, tgt_pid, conf, src_user in edges_data:
+            # 分别计算 source 和 target 在迁移后的归属
+            # 如果 target_pid 未指定（即全量迁移保持原人格），则分别保留各自的原 pid
+            final_src_pid = target_pid if target_pid else src_pid
+            final_tgt_pid = target_pid if target_pid else tgt_pid
 
-        # 3. 删除旧数据 (Delete)
+            sid_to_use = target_sid if target_sid else old_sid
+            # 显式生成两个节点在 "新世界" 的 ID
+            # 这样即使 src 和 tgt 属于不同人格，ID 也能正确指向 Step 2 中创建的对应节点
+            new_src_id = self._gen_pk(src, sid_to_use, final_src_pid)
+            new_tgt_id = self._gen_pk(tgt, sid_to_use, final_tgt_pid)
+            # 使用底层方法创建连接
+            self._force_create_edge(
+                src_id=new_src_id,
+                tgt_id=new_tgt_id,
+                relation=rel,
+                weight=weight,
+                confidence=conf if conf is not None else 1.0,
+                source_user=src_user if src_user else "unknown",
+            )
+
+        # 4. 删除旧数据 (Delete)
         self.conn.execute(
             f"""
             MATCH (n:Entity) WHERE {where_clause}
@@ -718,7 +745,6 @@ class GraphEngine:
             """,
             params,
         )
-
         logger.info("[GraphMemory] Migration completed.")
 
     def _force_create_node(self, name: str, sid: str, pid: str, type_: str, attr: dict):
@@ -757,6 +783,47 @@ class GraphEngine:
                 "now": now,
             },
         )
+
+    def _force_create_edge(
+        self,
+        src_id: str,
+        tgt_id: str,
+        relation: str,
+        weight: float,
+        confidence: float = 1.0,
+        source_user: str = "unknown",
+    ):
+        """
+        [辅助方法] 强制创建边（用于迁移或恢复），不触发业务逻辑（如访问计数更新）。
+        """
+        import time
+
+        now = int(time.time())
+
+        query = """
+            MATCH (a:Entity {id: $src_id}), (b:Entity {id: $tgt_id})
+            MERGE (a)-[r:Related {relation: $rel}]->(b)
+            ON CREATE SET
+                r.weight = $weight,
+                r.confidence = $conf,
+                r.source_user = $src_user,
+                r.updated_at = $now
+            ON MATCH SET
+                r.weight = $weight, /* 迁移通常意味着覆盖或保留原权重 */
+                r.updated_at = $now
+        """
+        params = {
+            "src_id": src_id,
+            "tgt_id": tgt_id,
+            "rel": relation,
+            "weight": weight,
+            "conf": confidence,
+            "src_user": source_user,
+            "now": now,
+        }
+
+        # 即使其中一个节点不存在（理论上 Step 2 已创建），Cypher 也不会报错，只是不创建边
+        self.conn.execute(query, params)
 
     # ================= 数据清空 =================
 

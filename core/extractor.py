@@ -52,7 +52,9 @@ class KnowledgeExtractor:
         self.keyword_mode = keyword_mode
         self.keyword_provider_id = keyword_provider_id
 
-    async def extract(self, text_block: str, is_group: bool = False) -> list[Triplet]:
+    async def extract(
+        self, text_block: str, is_group: bool = False, provider_id: str | None = None
+    ) -> list[Triplet]:
         """
         从文本块中提取三元组
         """
@@ -69,19 +71,20 @@ class KnowledgeExtractor:
         else:
             prompt = PRIVATE_CHAT_PROMPT.format(text=text_block)
 
-        triplets = await self._call_llm(prompt)
+        triplets = await self._call_llm(prompt, provider_id)
 
         logger.debug(
             f"[GraphMemory] Extraction finished in {time.time() - start_time:.2f}s. Found {len(triplets)} triplets."
         )
         return triplets
 
-    async def _call_llm(self, prompt: str) -> list[Triplet]:
+    async def _call_llm(self, prompt: str, provider_id: str | None = None) -> list[Triplet]:
         """
         调用 LLM 并解析 JSON
         """
         try:
-            if not self.provider_id:
+            effective_provider_id = provider_id or self.provider_id
+            if not effective_provider_id:
                 logger.warning(
                     "[GraphMemory] No provider_id configured for extraction."
                 )
@@ -89,7 +92,7 @@ class KnowledgeExtractor:
 
             start_req = time.time()
             resp = await self.context.llm_generate(
-                chat_provider_id=self.provider_id, prompt=prompt
+                chat_provider_id=effective_provider_id, prompt=prompt
             )
             logger.debug(
                 f"[GraphMemory] LLM request finished in {time.time() - start_req:.2f}s"
@@ -196,7 +199,9 @@ class KnowledgeExtractor:
             logger.warning(f"[GraphMemory] Failed to calc importance for '{text}': {e}")
             return 0.5
 
-    async def extract_keywords(self, query: str) -> list[str]:
+    async def extract_keywords(
+        self, query: str, provider_id: str | None = None
+    ) -> list[str]:
         """
         提取搜索关键词
         """
@@ -209,7 +214,7 @@ class KnowledgeExtractor:
             )
             return keywords
         else:
-            keywords = await self._extract_keywords_llm(query)
+            keywords = await self._extract_keywords_llm(query, provider_id)
             logger.debug(
                 f"[GraphMemory] LLM keyword extraction: {keywords} (Time: {time.time() - start_time:.2f}s)"
             )
@@ -240,12 +245,16 @@ class KnowledgeExtractor:
             # 回退策略：简单按空格分割，取前5个长于2的词
             return [w for w in query.split() if len(w) > 1][:5]
 
-    async def _extract_keywords_llm(self, query: str) -> list[str]:
+    async def _extract_keywords_llm(
+        self, query: str, provider_id: str | None = None
+    ) -> list[str]:
         """
         使用 LLM 提取关键词
         """
-        provider_id = self.keyword_provider_id or self.provider_id
-        if not provider_id:
+        effective_provider_id = (
+            self.keyword_provider_id or provider_id or self.provider_id
+        )
+        if not effective_provider_id:
             logger.warning(
                 "[GraphMemory] No provider available for LLM keyword extraction. Fallback to local."
             )
@@ -255,7 +264,7 @@ class KnowledgeExtractor:
 
         try:
             resp = await self.context.llm_generate(
-                chat_provider_id=provider_id, prompt=prompt
+                chat_provider_id=effective_provider_id, prompt=prompt
             )
             if resp and resp.completion_text:
                 text = resp.completion_text.strip()

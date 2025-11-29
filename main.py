@@ -104,8 +104,9 @@ class GraphMemory(Star):
             )
             return
 
-        self.extractor.provider_id = provider_id
-        triplets = await self.extractor.extract(text, is_group=is_group)
+        triplets = await self.extractor.extract(
+            text, is_group=is_group, provider_id=provider_id
+        )
 
         count = 0
         for t in triplets:
@@ -142,14 +143,11 @@ class GraphMemory(Star):
         # 获取当前 Provider ID (仅当 LLM 模式时需要)
         # 如果是 Local 模式，extractor 不需要 provider_id 也能工作
         provider_id = await self.context.get_current_chat_provider_id(session_id)
-        if provider_id:
-            self.extractor.provider_id = provider_id
 
         # 提取关键词
-        keywords = await self.extractor.extract_keywords(event.message_str)
-        if not keywords:
-            # Fallback
-            keywords = event.message_str.split()[:5]
+        keywords = await self.extractor.extract_keywords(
+            event.message_str, provider_id=provider_id
+        )
 
         if not keywords:
             return
@@ -186,8 +184,11 @@ class GraphMemory(Star):
         old_sid = event.unified_msg_origin
         new_sid = target_session
 
+        # 迁移整个会话（包含所有 Persona），保持原有的 Persona ID
         await self.graph_engine.migrate(
-            from_context={"session_id": old_sid}, to_context={"session_id": new_sid}
+            from_context={"session_id": old_sid},
+            to_context={"session_id": new_sid},
+            # 注意：不指定 persona_id，migrate 内部会保留原记录的 persona_id
         )
         yield event.plain_result(f"Memory migrated from {old_sid} to {new_sid}")
 
@@ -233,14 +234,17 @@ class GraphMemory(Star):
 
         if hasattr(self, "_maintenance_task"):
             self._maintenance_task.cancel()
-            # 退出前最后一次 Flush
-            if hasattr(self, "graph_engine"):
-                await self.graph_engine.flush_access_stats()
+            try:
+                await self._maintenance_task
+            except asyncio.CancelledError:
+                pass
 
         if hasattr(self, "buffer_manager"):
             await self.buffer_manager.shutdown()
 
         if hasattr(self, "graph_engine"):
+            # 退出前最后一次 Flush Access Stats (如果需要的话，但此时最好确保 executor 可用)
+            # await self.graph_engine.flush_access_stats()
             self.graph_engine.close()
 
     async def _get_persona_id(self, event: AstrMessageEvent) -> str:
