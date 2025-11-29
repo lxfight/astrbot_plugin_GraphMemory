@@ -272,6 +272,7 @@ class GraphEngine:
         }
 
         try:
+            logger.debug(f"[GraphMemory DEBUG] Executing Cypher (Add Triplet): {src_name} --[{relation}]--> {tgt_name}")
             self._run_query(query, params)
         except Exception as e:
             logger.error(f"[GraphMemory] Failed to add triplet: {e}")
@@ -355,12 +356,16 @@ class GraphEngine:
         collected_triplets = set()
         processed_ids = set()
 
+        logger.debug(f"[GraphMemory DEBUG] Starting BFS search (Hops: {hops})")
+
         # 循环 hops 次
-        for _ in range(hops):
+        for i in range(hops):
             # 过滤掉已经处理过的节点，防止死循环
             active_seeds = list(current_seed_ids - processed_ids)
             if not active_seeds:
                 break
+
+            logger.debug(f"[GraphMemory DEBUG] Hop {i+1}: {len(active_seeds)} active seeds.")
 
             # 标记为已处理
             processed_ids.update(active_seeds)
@@ -383,7 +388,8 @@ class GraphEngine:
                 while res_out.has_next():
                     row = res_out.get_next()  # [a.name, r.relation, b.name, b.id]
                     # 生成文本: (Node A) --[relation]--> (Node B)
-                    collected_triplets.add(f"({row[0]}) --[{row[1]}]--> ({row[2]})")
+                    triplet_str = f"({row[0]}) --[{row[1]}]--> ({row[2]})"
+                    collected_triplets.add(triplet_str)
                     next_hop_ids.add(row[3])  # 将 B 节点加入下一轮搜索
             except Exception as e:
                 logger.error(f"[GraphMemory] Error in outgoing hop: {e}")
@@ -400,14 +406,17 @@ class GraphEngine:
                 res_in: Any = self._run_query(q_in, hop_params)
                 while res_in.has_next():
                     row = res_in.get_next()  # [a.name, r.relation, b.name, a.id]
-                    collected_triplets.add(f"({row[0]}) --[{row[1]}]--> ({row[2]})")
+                    triplet_str = f"({row[0]}) --[{row[1]}]--> ({row[2]})"
+                    collected_triplets.add(triplet_str)
                     next_hop_ids.add(row[3])  # 将 A 节点加入下一轮搜索
             except Exception as e:
                 logger.error(f"[GraphMemory] Error in incoming hop: {e}")
 
+            logger.debug(f"[GraphMemory DEBUG] Hop {i+1} found {len(next_hop_ids)} new nodes.")
             # 更新种子，准备下一跳
             current_seed_ids = next_hop_ids
 
+        logger.debug(f"[GraphMemory DEBUG] Search finished. Total triplets found: {len(collected_triplets)}")
         return "\n".join(collected_triplets)
 
     # ================= 维护 (Maintenance) =================

@@ -2,7 +2,7 @@ import asyncio
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter
-from astrbot.api.provider import ProviderRequest
+from astrbot.api.provider import LLMResponse, ProviderRequest
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core import GraphEngine
@@ -85,11 +85,15 @@ class GraphMemory(Star):
         缓冲区刷新回调：处理累积的对话文本
         """
         if is_group and not self.enable_group_learning:
+            logger.debug(
+                f"[GraphMemory DEBUG] Skipping flush for group {session_id} (group learning disabled)"
+            )
             return
 
         logger.info(
             f"[GraphMemory] Flushing buffer for {session_id} (Group: {is_group}, Persona: {persona_id}), length: {len(text)}"
         )
+        logger.debug(f"[GraphMemory DEBUG] Flushed content preview: {text[:100]}...")
 
         # 确定 Provider ID
         provider_id = self.learning_model_id
@@ -103,6 +107,8 @@ class GraphMemory(Star):
                 f"[GraphMemory] No provider available for extraction in session {session_id}"
             )
             return
+
+        logger.debug(f"[GraphMemory DEBUG] Using provider {provider_id} for extraction")
 
         triplets = await self.extractor.extract(
             text, is_group=is_group, provider_id=provider_id
@@ -150,9 +156,12 @@ class GraphMemory(Star):
         )
 
         if not keywords:
+            logger.debug(
+                "[GraphMemory DEBUG] No keywords extracted, skipping memory injection."
+            )
             return
 
-        logger.debug(f"[GraphMemory] Searching memory with keywords: {keywords}")
+        logger.debug(f"[GraphMemory DEBUG] Searching memory with keywords: {keywords}")
 
         # 2跳查询，获取更丰富的上下文
         memory_text = await self.graph_engine.search_subgraph(
@@ -161,10 +170,12 @@ class GraphMemory(Star):
 
         if memory_text:
             logger.debug(
-                f"[GraphMemory] Found relevant context ({len(memory_text)} chars). Injecting."
+                f"[GraphMemory DEBUG] Found relevant context ({len(memory_text)} chars). Injecting:\n{memory_text[:200]}..."
             )
             # 注入到 System Prompt
             req.system_prompt += f"\n\n[Graph Memory Context]\n{memory_text}\n(Reference these relationships if relevant.)"
+        else:
+            logger.debug("[GraphMemory DEBUG] No relevant context found.")
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_user_message(self, event: AstrMessageEvent):
@@ -172,11 +183,26 @@ class GraphMemory(Star):
         persona_id = await self._get_persona_id(event)
         await self.buffer_manager.add_user_message(event, persona_id)
 
-    @filter.after_message_sent()
-    async def save_memory(self, event: AstrMessageEvent):
-        """监听 Bot 发送的消息"""
+    @filter.on_llm_response()
+    async def on_llm_resp(self, event: AstrMessageEvent, resp: LLMResponse):
+        """监听 LLM 响应 (替代 after_message_sent)"""
         persona_id = await self._get_persona_id(event)
-        await self.buffer_manager.add_bot_message(event, persona_id)
+
+        # 优先使用 completion_text
+        content = resp.completion_text
+
+        logger.debug(
+            f"[GraphMemory DEBUG] on_llm_resp triggered. Content length: {len(content) if content else 0}"
+        )
+
+        if content:
+            await self.buffer_manager.add_bot_message(
+                event, persona_id, content=content
+            )
+        else:
+            logger.debug(
+                f"[GraphMemory DEBUG] LLM response content is empty. Raw resp type: {type(resp)}"
+            )
 
     @filter.command("migrate_memory")
     async def cmd_migrate(self, event: AstrMessageEvent, target_session: str):

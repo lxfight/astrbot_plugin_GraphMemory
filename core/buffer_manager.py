@@ -55,6 +55,7 @@ class SessionBuffer:
 
         # 检查是否达到条数限制
         if len(self._buffer) >= self.max_size:
+            logger.debug(f"[GraphMemory DEBUG] Buffer reached size limit {self.max_size} (Session: {self.session_id})")
             return True
         return False
 
@@ -157,6 +158,8 @@ class BufferManager:
         # 使用 get_message_outline 获取包含占位符的消息内容
         content = event.get_message_outline()
 
+        logger.debug(f"[GraphMemory DEBUG] Adding user message to buffer: {content[:50]}... (Session: {session_id}, Persona: {persona_id})")
+
         msg = BufferMessage(
             sender_id=event.get_sender_id(),
             sender_name=event.get_sender_name(),
@@ -168,27 +171,31 @@ class BufferManager:
         )
         await self._push_to_buffer(session_id, msg)
 
-    async def add_bot_message(self, event: AstrMessageEvent, persona_id: str):
-        """处理 Bot 发出的消息 (通过 after_message_sent 钩子)"""
+    async def add_bot_message(self, event: AstrMessageEvent, persona_id: str, content: str | None = None):
+        """处理 Bot 发出的消息"""
         session_id = self._get_session_key(event)
 
-        # 获取 Bot 回复的内容
-        result = event.get_result()
-        if not result:
-            return
-
         bot_content = ""
-        if isinstance(result, MessageEventResult) and result.chain:
-            bot_content = self._outline_chain(result.chain)
-        elif isinstance(result, str):
-            bot_content = result
+        if content:
+            bot_content = content
         else:
-            return
+            # 获取 Bot 回复的内容 (兼容旧方式)
+            result = event.get_result()
+            if not result:
+                return
+
+            if isinstance(result, MessageEventResult) and result.chain:
+                bot_content = self._outline_chain(result.chain)
+            elif isinstance(result, str):
+                bot_content = result
+            else:
+                return
 
         if not bot_content:
             return
 
-        # Bot 消息通常沿用会话属性，但为了严谨，我们认为 Bot 消息不改变群聊属性（因为它在同一个会话中）
+        logger.debug(f"[GraphMemory DEBUG] Adding bot message to buffer: {bot_content[:50]}... (Session: {session_id}, Persona: {persona_id})")
+
         # persona_id 应该由上层传入
         msg = BufferMessage(
             sender_id=event.message_obj.self_id,  # Bot 自己的 ID

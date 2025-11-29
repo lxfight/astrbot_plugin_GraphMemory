@@ -1,14 +1,12 @@
 import json
-import logging
 import time
 from dataclasses import dataclass
 from typing import Literal
 
+from astrbot.api import logger
 from astrbot.api.star import Context
 
 from .prompts import GROUP_CHAT_PROMPT, PRIVATE_CHAT_PROMPT, SEARCH_KEYWORDS_PROMPT
-
-logger = logging.getLogger("GraphMemory.Extractor")
 
 try:
     import jieba
@@ -63,7 +61,7 @@ class KnowledgeExtractor:
 
         start_time = time.time()
         logger.debug(
-            f"[GraphMemory] Starting extraction. Group: {is_group}, Length: {len(text_block)}"
+            f"[GraphMemory DEBUG] Starting extraction. Group: {is_group}, Length: {len(text_block)}"
         )
 
         if is_group:
@@ -71,14 +69,18 @@ class KnowledgeExtractor:
         else:
             prompt = PRIVATE_CHAT_PROMPT.format(text=text_block)
 
+        logger.debug(f"[GraphMemory DEBUG] Prompt preview: {prompt[:100]}...")
+
         triplets = await self._call_llm(prompt, provider_id)
 
         logger.debug(
-            f"[GraphMemory] Extraction finished in {time.time() - start_time:.2f}s. Found {len(triplets)} triplets."
+            f"[GraphMemory DEBUG] Extraction finished in {time.time() - start_time:.2f}s. Found {len(triplets)} triplets."
         )
         return triplets
 
-    async def _call_llm(self, prompt: str, provider_id: str | None = None) -> list[Triplet]:
+    async def _call_llm(
+        self, prompt: str, provider_id: str | None = None
+    ) -> list[Triplet]:
         """
         调用 LLM 并解析 JSON
         """
@@ -91,18 +93,23 @@ class KnowledgeExtractor:
                 return []
 
             start_req = time.time()
+            logger.debug(
+                f"[GraphMemory DEBUG] Calling LLM (Provider: {effective_provider_id})..."
+            )
+
             resp = await self.context.llm_generate(
                 chat_provider_id=effective_provider_id, prompt=prompt
             )
             logger.debug(
-                f"[GraphMemory] LLM request finished in {time.time() - start_req:.2f}s"
+                f"[GraphMemory DEBUG] LLM request finished in {time.time() - start_req:.2f}s"
             )
 
             if not resp or not resp.completion_text:
-                logger.warning("[GraphMemory] LLM returned empty response.")
+                logger.warning("[GraphMemory DEBUG] LLM returned empty response.")
                 return []
 
             raw_text = resp.completion_text
+            logger.debug(f"[GraphMemory DEBUG] LLM Raw Response:\n{raw_text}")
 
             # 尝试解析 JSON
             start = raw_text.find("[")
@@ -126,12 +133,19 @@ class KnowledgeExtractor:
                 src_imp = self._calculate_importance(src)
                 tgt_imp = self._calculate_importance(tgt)
 
+                rel = item.get("rel", "")
+                conf = item.get("confidence", 1.0)
+
+                logger.debug(
+                    f"[GraphMemory DEBUG] Parsed triplet: ({src}) --[{rel}]--> ({tgt}) (Confidence: {conf})"
+                )
+
                 triplets.append(
                     Triplet(
                         src=src,
-                        rel=item.get("rel", ""),
+                        rel=rel,
                         tgt=tgt,
-                        confidence=item.get("confidence", 1.0),
+                        confidence=conf,
                         source_user=item.get("source_user", "unknown"),
                         src_importance=src_imp,
                         tgt_importance=tgt_imp,
@@ -144,7 +158,9 @@ class KnowledgeExtractor:
             logger.error(f"[GraphMemory] JSON Parse Error. Raw text: {raw_text}")
             return []
         except Exception as e:
-            logger.error(f"[GraphMemory] LLM extraction error: {e}", exc_info=True)
+            # 捕获所有异常（包括 ProviderNotFoundError），避免 Crash
+            logger.error(f"[GraphMemory] LLM extraction error: {e}")
+            logger.debug(f"[GraphMemory DEBUG] Detailed traceback:{e}", exc_info=True)
             return []
 
     def _calculate_importance(self, text: str) -> float:
@@ -210,13 +226,13 @@ class KnowledgeExtractor:
         if self.keyword_mode == "local":
             keywords = self._extract_keywords_local(query)
             logger.debug(
-                f"[GraphMemory] Local keyword extraction: {keywords} (Time: {time.time() - start_time:.4f}s)"
+                f"[GraphMemory DEBUG] Local keyword extraction: {keywords} (Time: {time.time() - start_time:.4f}s)"
             )
             return keywords
         else:
             keywords = await self._extract_keywords_llm(query, provider_id)
             logger.debug(
-                f"[GraphMemory] LLM keyword extraction: {keywords} (Time: {time.time() - start_time:.2f}s)"
+                f"[GraphMemory DEBUG] LLM keyword extraction: {keywords} (Time: {time.time() - start_time:.2f}s)"
             )
             return keywords
 
