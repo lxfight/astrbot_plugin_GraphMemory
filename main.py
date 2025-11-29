@@ -5,9 +5,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.provider import LLMResponse, ProviderRequest
 from astrbot.api.star import Context, Star, StarTools, register
 
-from .core import GraphEngine
-from .core.buffer_manager import BufferManager
-from .core.extractor import KnowledgeExtractor
+from .core import BufferManager, GraphEngine, KnowledgeExtractor
 
 
 @register(
@@ -172,7 +170,7 @@ class GraphMemory(Star):
             logger.debug(
                 f"[GraphMemory DEBUG] Found relevant context ({len(memory_text)} chars). Injecting:\n{memory_text[:200]}..."
             )
-            # 注入到 System Prompt
+            # TODO 目前注入到 System Prompt，开发多种注入方式
             req.system_prompt += f"\n\n[Graph Memory Context]\n{memory_text}\n(Reference these relationships if relevant.)"
         else:
             logger.debug("[GraphMemory DEBUG] No relevant context found.")
@@ -188,7 +186,6 @@ class GraphMemory(Star):
         """监听 LLM 响应 (替代 after_message_sent)"""
         persona_id = await self._get_persona_id(event)
 
-        # 优先使用 completion_text
         content = resp.completion_text
 
         logger.debug(
