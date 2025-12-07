@@ -1,6 +1,6 @@
 # data/plugins/astrbot_plugin_GraphMemory/populate_test_data.py
 
-"""
+r"""
 一个用于向 GraphMemory 数据库填充测试数据的独立脚本。
 该脚本旨在创建一个包含多个会话、用户、实体和关系的复杂图谱，
 以便于对 WebUI 的功能进行全面测试。
@@ -12,7 +12,6 @@
 """
 
 import asyncio
-import os
 import platform
 import sys
 import time
@@ -33,8 +32,8 @@ try:
     from data.plugins.astrbot_plugin_GraphMemory.core.graph_engine import GraphEngine
     from data.plugins.astrbot_plugin_GraphMemory.core.graph_entities import (
         EntityNode,
-        MessageNode,
         MentionsRel,
+        MessageNode,
         RelatedToRel,
         SessionNode,
         UserNode,
@@ -110,7 +109,7 @@ async def populate_data():
     # 使用正确的 plugin_data 路径
     plugin_data_path = ROOT_DIR / "data" / "plugin_data" / "astrbot_plugin_GraphMemory"
     plugin_data_path.mkdir(parents=True, exist_ok=True)
-    
+
     # 使用 None 作为 embedding_provider，因为我们不需要在此脚本中生成向量
     engine = GraphEngine(plugin_data_path, embedding_provider=None)
 
@@ -134,12 +133,12 @@ async def populate_data():
     print("\n[3/5] 正在模拟对话并插入消息...")
     base_timestamp = int(time.time()) - 86400  # 从24小时前开始
     msg_id_counter = base_timestamp
-    
+
     for entry in DIALOGUES:
         msg_id = str(msg_id_counter)
         # 使用相对时间偏移，使对话看起来更自然
         timestamp = base_timestamp + entry.get("timestamp_offset", 0)
-        
+
         message = MessageNode(
             id=msg_id,
             content=entry["content"],
@@ -148,7 +147,7 @@ async def populate_data():
             session_id=entry["session"],
         )
         await engine.add_message(message)
-        
+
         # 基于关键词创建 MENTIONS 关系
         mentions_created = 0
         for entity in ENTITIES:
@@ -160,14 +159,14 @@ async def populate_data():
                 )
                 await engine.add_mention(mention)
                 mentions_created += 1
-        
+
         msg_id_counter += 1
-    
+
     print(f"  - 插入了 {len(DIALOGUES)} 条消息，包含多个实体提及关系。")
 
     # 4. 为会话创建记忆摘要
     print("\n[4/6] 正在创建记忆摘要...")
-    
+
     # 为技术交流群创建摘要
     summary_text_1 = "Alice、Bob 和 Carol 讨论了使用 Python 和 AstrBot 框架开发聊天机器人。他们提到 AstrBot 支持 GraphRAG 技术，并使用 KuzuDB 作为图数据库，FastAPI 用于构建后端接口。"
     await engine.consolidate_memory(
@@ -177,7 +176,7 @@ async def populate_data():
         user_ids=["qq_1001", "qq_1002", "qq_1003"],
     )
     print("  - 为 '技术交流群' 创建了记忆摘要。")
-    
+
     # 为Python学习小组创建摘要
     summary_text_2 = "Alice 和 Carol 讨论了 Python 在机器学习领域的应用，认为其生态系统完善且库资源丰富。"
     await engine.consolidate_memory(
@@ -190,7 +189,7 @@ async def populate_data():
 
     # 5. 手动创建一些额外的测试节点
     print("\n[5/6] 正在创建额外的测试节点...")
-    
+
     # 创建一个孤立的实体，用于测试"删除孤立实体"功能
     await engine.add_node_manually("Entity", {
         "name": "孤立的测试节点",
@@ -198,7 +197,7 @@ async def populate_data():
         "summary": "这是一个用于测试的孤立实体节点，没有任何关系连接。"
     })
     print("  - 创建了 '孤立的测试节点' (用于测试删除孤立实体功能)。")
-    
+
     # 创建额外的实体，这些实体将通过消息的 MENTIONS 关系与图谱关联
     additional_entities = [
         EntityNode(name="Docker", type="Technology", summary="容器化技术平台"),
@@ -226,12 +225,12 @@ if __name__ == "__main__":
     if db_folder.exists():
         print(f"警告: 数据库文件夹 '{db_folder}' 已存在。")
         choice = input("您想删除现有数据库并重新填充吗？ (y/N): ").lower()
-        if choice == 'y':
+        if choice == "y":
             import shutil
             print(f"正在删除旧数据库: {db_folder}")
             shutil.rmtree(db_folder)
         else:
             print("操作已取消。")
             sys.exit(0)
-            
+
     asyncio.run(populate_data())

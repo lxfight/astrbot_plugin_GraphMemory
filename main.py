@@ -42,7 +42,7 @@ class MonitoringLogHandler(logging.Handler):
             # 这在某些情况下可能不理想，但比直接崩溃要好
             try:
                 asyncio.run(coro)
-            except RuntimeError as e:
+            except RuntimeError:
                 # 如果已经有循环在运行但我们没获取到，这可能会失败
                 # 在这种情况下，我们无能为力，只能放弃记录这条日志
                 pass

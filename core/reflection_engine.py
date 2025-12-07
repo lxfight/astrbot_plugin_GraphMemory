@@ -10,7 +10,6 @@ import json
 from typing import TYPE_CHECKING
 
 from astrbot.api import logger
-from astrbot.api.provider import ProviderRequest
 
 from .extractor import KnowledgeExtractor
 from .graph_entities import RelatedToRel

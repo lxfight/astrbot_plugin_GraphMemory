@@ -40,8 +40,12 @@ from .queries import (
     DELETE_NODE_BY_ID,
     FIND_SESSIONS_FOR_CONSOLIDATION,
     GET_ALL_CONTEXTS,
-    GET_FULL_GRAPH_BASE,
-    GET_FULL_GRAPH_RELATIONS,
+    GET_SESSION_GRAPH_NODES_PART1,
+    GET_SESSION_GRAPH_NODES_PART2,
+    GET_SESSION_GRAPH_NODES_PART3,
+    GET_SESSION_GRAPH_EDGES_PART1,
+    GET_SESSION_GRAPH_EDGES_PART2,
+    GET_SESSION_GRAPH_EDGES_PART3,
     GET_GLOBAL_GRAPH_EDGES,
     GET_GLOBAL_GRAPH_NODES,
     GET_GLOBAL_GRAPH_OPTIMIZED_EDGES,
@@ -855,63 +859,8 @@ class GraphEngine:
 
     def _get_full_graph_sync(self, session_id: str) -> dict | None:
         """[同步] 导出完整子图的实现。"""
-        graph = {"nodes": [], "edges": []}
-        nodes_seen = set()
-
-        def add_node(node_data):
-            """辅助函数，用于向图中添加节点并避免重复，同时格式化为 vis.js 兼容格式。"""
-            node_id = node_data.get("id") or node_data.get("name")
-            if node_id and node_id not in nodes_seen:
-                vis_node = {
-                    "id": node_id,
-                    "label": node_data.get("name") or node_data.get("content", "")[:30],
-                    "group": node_data["_label"],
-                    "title": "\n".join(f"{k}: {v}" for k, v in node_data.items()),
-                }
-                graph["nodes"].append(vis_node)
-                nodes_seen.add(node_id)
-
         try:
-            res = self.execute_query(GET_FULL_GRAPH_BASE, {"sid": session_id})
-
-            while res.has_next():
-                s, u, m, r_mentions, e, r_has_mem, mf, e_manual = res.get_next()
-
-                if s: add_node(s)
-                if u: add_node(u)
-                if m: add_node(m)
-                if e: add_node(e)
-                if mf: add_node(mf)
-                if e_manual: add_node(e_manual)
-
-
-                if u and m:
-                    graph["edges"].append(
-                        {"from": u["id"], "to": m["id"], "label": "SENT"}
-                    )
-                if m and s:
-                    graph["edges"].append(
-                        {"from": m["id"], "to": s["id"], "label": "POSTED_IN"}
-                    )
-                if m and e and r_mentions:
-                    graph["edges"].append(
-                        {"from": m["id"], "to": e["name"], "label": "MENTIONS"}
-                    )
-                if s and mf and r_has_mem:
-                    graph["edges"].append(
-                        {"from": s["id"], "to": mf["id"], "label": "HAS_MEMORY"}
-                    )
-
-            res_rels = self.execute_query(GET_FULL_GRAPH_RELATIONS, {"sid": session_id})
-            while res_rels.has_next():
-                e1, r, e2 = res_rels.get_next()
-                add_node(e1)
-                add_node(e2)
-                graph["edges"].append(
-                    {"from": e1["name"], "to": e2["name"], "label": r["relation"]}
-                )
-
-            return graph
+            return self._get_session_graph_custom(session_id)
         except Exception as e:
             logger.error(
                 f"[GraphMemory] 为会话 '{session_id}' 导出图失败: {e}",
@@ -925,7 +874,9 @@ class GraphEngine:
 
     def _get_global_graph_sync(self) -> dict | None:
         """[同步] 导出全局图谱的实现。"""
-        return self._get_global_graph_common(GET_GLOBAL_GRAPH_NODES, GET_GLOBAL_GRAPH_EDGES)
+        return self._get_global_graph_common(
+            GET_GLOBAL_GRAPH_NODES, GET_GLOBAL_GRAPH_EDGES
+        )
 
     async def get_global_graph_optimized(self) -> dict | None:
         """[异步] 导出优化的全局知识图谱（仅实体和记忆片段），用于 WebUI 可视化。"""
@@ -933,28 +884,31 @@ class GraphEngine:
 
     def _get_global_graph_optimized_sync(self) -> dict | None:
         """[同步] 导出优化全局图谱的实现。"""
-        return self._get_global_graph_common(GET_GLOBAL_GRAPH_OPTIMIZED_NODES, GET_GLOBAL_GRAPH_OPTIMIZED_EDGES)
+        return self._get_global_graph_common(
+            GET_GLOBAL_GRAPH_OPTIMIZED_NODES, GET_GLOBAL_GRAPH_OPTIMIZED_EDGES
+        )
 
-    def _get_global_graph_common(self, nodes_query: str, edges_query: str) -> dict | None:
-        """[Helper] 全局图谱导出的通用逻辑。"""
+    def _get_session_graph_custom(self, session_id: str) -> dict | None:
+        """[Helper] 会话图谱导出的自定义逻辑，使用三个独立查询。"""
         graph = {"nodes": [], "edges": []}
         nodes_seen = set()
+        params = {"sid": session_id}
 
         def add_node(node_data):
             if not node_data:
                 return None
-            
+
             node_id = node_data.get("id") or node_data.get("name")
             if not node_id:
                 return None
-                
+
             if node_id in nodes_seen:
                 return node_id
-                
+
             name = node_data.get("name")
             text = node_data.get("text")
             content = node_data.get("content")
-            
+
             if name:
                 label = name
             elif text:
@@ -963,46 +917,145 @@ class GraphEngine:
                 label = content[:30] if len(content) > 30 else content
             else:
                 label = str(node_id)[:30]
-            
+
             node_type = node_data.get("_label", "Unknown")
-            
+
             vis_node = {
                 "id": node_id,
                 "name": label,
                 "type": node_type,
                 "group": node_type,
-                "title": "\n".join(f"{k}: {v}" for k, v in node_data.items() if v is not None),
-                "properties": {k: v for k, v in node_data.items() if not k.startswith("_") and v is not None},
+                "title": "\n".join(
+                    f"{k}: {v}" for k, v in node_data.items() if v is not None
+                ),
+                "properties": {
+                    k: v
+                    for k, v in node_data.items()
+                    if not k.startswith("_") and v is not None
+                },
             }
             graph["nodes"].append(vis_node)
             nodes_seen.add(node_id)
             return node_id
-        
+
         try:
-            res_nodes = self.execute_query(nodes_query)
+            # 执行三个独立的节点查询
+            for query in [GET_SESSION_GRAPH_NODES_PART1, GET_SESSION_GRAPH_NODES_PART2, GET_SESSION_GRAPH_NODES_PART3]:
+                res_nodes = self.execute_query(query, params)
+                while res_nodes.has_next():
+                    node = res_nodes.get_next()[0]
+                    add_node(node)
+
+            # 执行三个独立的边查询
+            for query in [GET_SESSION_GRAPH_EDGES_PART1, GET_SESSION_GRAPH_EDGES_PART2, GET_SESSION_GRAPH_EDGES_PART3]:
+                res_edges = self.execute_query(query, params)
+                while res_edges.has_next():
+                    a, r, b = res_edges.get_next()
+                    if not a or not b or not r:
+                        continue
+
+                    from_id = add_node(a)
+                    to_id = add_node(b)
+
+                    if from_id and to_id:
+                        label = r.get("relation") or r.get("_label", "UNKNOWN")
+                        graph["edges"].append(
+                            {
+                                "source": from_id,
+                                "target": to_id,
+                                "relation": label,
+                                "label": label,
+                            }
+                        )
+
+            logger.info(
+                f"[GraphMemory] 会话图谱导出成功: {len(graph['nodes'])} 个节点, {len(graph['edges'])} 条边"
+            )
+            return graph
+        except Exception as e:
+            logger.error(f"[GraphMemory] 导出会话图谱失败: {e}", exc_info=True)
+            return {"nodes": [], "edges": []}
+
+    def _get_global_graph_common(
+        self, nodes_query: str, edges_query: str, params: dict | None = None
+    ) -> dict | None:
+        """[Helper] 全局图谱导出的通用逻辑。"""
+        graph = {"nodes": [], "edges": []}
+        nodes_seen = set()
+
+        def add_node(node_data):
+            if not node_data:
+                return None
+
+            node_id = node_data.get("id") or node_data.get("name")
+            if not node_id:
+                return None
+
+            if node_id in nodes_seen:
+                return node_id
+
+            name = node_data.get("name")
+            text = node_data.get("text")
+            content = node_data.get("content")
+
+            if name:
+                label = name
+            elif text:
+                label = text[:30] if len(text) > 30 else text
+            elif content:
+                label = content[:30] if len(content) > 30 else content
+            else:
+                label = str(node_id)[:30]
+
+            node_type = node_data.get("_label", "Unknown")
+
+            vis_node = {
+                "id": node_id,
+                "name": label,
+                "type": node_type,
+                "group": node_type,
+                "title": "\n".join(
+                    f"{k}: {v}" for k, v in node_data.items() if v is not None
+                ),
+                "properties": {
+                    k: v
+                    for k, v in node_data.items()
+                    if not k.startswith("_") and v is not None
+                },
+            }
+            graph["nodes"].append(vis_node)
+            nodes_seen.add(node_id)
+            return node_id
+
+        try:
+            res_nodes = self.execute_query(nodes_query, params)
             while res_nodes.has_next():
                 node = res_nodes.get_next()[0]
                 add_node(node)
 
-            res_edges = self.execute_query(edges_query)
+            res_edges = self.execute_query(edges_query, params)
             while res_edges.has_next():
                 a, r, b = res_edges.get_next()
                 if not a or not b or not r:
                     continue
-                    
+
                 from_id = add_node(a)
                 to_id = add_node(b)
-                
+
                 if from_id and to_id:
                     label = r.get("relation") or r.get("_label", "UNKNOWN")
-                    graph["edges"].append({
-                        "source": from_id,
-                        "target": to_id,
-                        "relation": label,
-                        "label": label
-                    })
-            
-            logger.info(f"[GraphMemory] 全局图谱导出成功: {len(graph['nodes'])} 个节点, {len(graph['edges'])} 条边")
+                    graph["edges"].append(
+                        {
+                            "source": from_id,
+                            "target": to_id,
+                            "relation": label,
+                            "label": label,
+                        }
+                    )
+
+            logger.info(
+                f"[GraphMemory] 全局图谱导出成功: {len(graph['nodes'])} 个节点, {len(graph['edges'])} 条边"
+            )
             return graph
         except Exception as e:
             logger.error(f"[GraphMemory] 导出全局图谱失败: {e}", exc_info=True)
@@ -1127,10 +1180,10 @@ class GraphEngine:
             if node_type == "Entity":
                 if "name" not in properties:
                     raise ValueError("创建实体时必须提供 'name' 属性。")
-                
+
                 # 从 properties 中提取 session_id（如果存在），但不传给 EntityNode
-                session_id = properties.pop('session_id', None)
-                
+                session_id = properties.pop("session_id", None)
+
                 entity = EntityNode(**properties)
                 params = {
                     "name": entity.name,
@@ -1143,8 +1196,13 @@ class GraphEngine:
 
                 # 如果提供了 session_id，则直接将会话和实体链接
                 if session_id:
-                    self.execute_query(LINK_ENTITY_TO_SESSION, {"sid": session_id, "ename": entity.name})
-                    logger.info(f"已将新实体 '{entity.name}' 关联到会话 '{session_id}'。")
+                    self.execute_query(
+                        LINK_ENTITY_TO_SESSION,
+                        {"sid": session_id, "ename": entity.name},
+                    )
+                    logger.info(
+                        f"已将新实体 '{entity.name}' 关联到会话 '{session_id}'。"
+                    )
 
             elif node_type == "MemoryFragment":
                 if "text" not in properties:

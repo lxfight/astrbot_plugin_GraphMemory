@@ -15,6 +15,9 @@
         debugResult: null,
         showLabels: true,
         Graph: null,
+        isConnecting: false, // 新增：是否处于连接模式
+        connectionStartNode: null, // 新增：连接操作的起始节点
+        isEditingNode: false, // 新增：是否处于节点编辑模式
         // 监控状态
         ws: null,
         logPaused: false,
@@ -65,7 +68,8 @@
         logPauseToggle: document.getElementById('log-pause-toggle'),
         logClear: document.getElementById('log-clear'),
         toolsBtn: document.getElementById('tools-btn'),
-        linkModeBtn: document.getElementById('link-mode-btn'),
+        linkEntityBtn: document.getElementById('link-entity-btn'),
+        connectNodesBtn: document.getElementById('connect-nodes-btn'),
         modalOverlay: document.getElementById('modal-overlay'),
         modalBox: document.getElementById('modal-box'),
         modalTitle: document.getElementById('modal-title'),
@@ -74,20 +78,12 @@
     };
     
     function getAuthHeaders() {
-        const token = localStorage.getItem('session_token');
+        const token = sessionStorage.getItem('session_token');
         return token ? { 'Authorization': `Bearer ${token}` } : {};
     }
     
     async function checkSession() {
-        let token = localStorage.getItem('session_token');
-        if (!token) {
-            const cookies = document.cookie.split(';');
-            const sessionCookie = cookies.find(c => c.trim().startsWith('session_token='));
-            if (sessionCookie) {
-                token = sessionCookie.split('=')[1].trim();
-                localStorage.setItem('session_token', token);
-            }
-        }
+        let token = sessionStorage.getItem('session_token');
         if (token) {
             try {
                 // Use a valid, lightweight endpoint for session checking
@@ -100,8 +96,8 @@
             } catch (e) {
                 console.error('会话验证失败:', e);
             }
-            localStorage.removeItem('session_token');
-            document.cookie = 'session_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+            // If check fails, clear the invalid token
+            sessionStorage.removeItem('session_token');
         }
     }
     
@@ -118,7 +114,7 @@
             
             if (res.ok) {
                 const data = await res.json();
-                if (data.token) localStorage.setItem('session_token', data.token);
+                if (data.token) sessionStorage.setItem('session_token', data.token);
                 state.isLoggedIn = true;
                 el.loginError.textContent = '';
                 showMainApp();
@@ -219,7 +215,7 @@
             try {
                 const res = await fetch('/api/link', {
                     method: 'POST',
-                    headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                    headers: { ...getAuth-headers(), 'Content-Type': 'application/json' },
                     body: JSON.stringify({ session_id: sessionId, entity_name: entityName })
                 });
                 
@@ -238,11 +234,66 @@
         });
     }
 
+    function showConnectNodesModal(fromNode, toNode) {
+        const content = `
+            <p style="font-size: 0.875rem; color: #999; margin-bottom: 1.5rem;">
+                创建从 <strong>${fromNode.name}</strong> 到 <strong>${toNode.name}</strong> 的关系。
+            </p>
+            <div style="margin-bottom: 1rem;">
+                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.5rem;">关系名称 (例如: IS_A, PART_OF)</label>
+                <input type="text" id="relation-type-input" placeholder="输入关系名称..." style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 0.25rem; background: transparent; color: inherit;">
+            </div>
+            <button id="confirm-connect-btn" class="btn btn-primary">创建关系</button>
+            <div id="connect-status" style="margin-top: 1rem; font-size: 0.75rem; color: #666;"></div>
+        `;
+        openModal('连接节点', content);
 
+        document.getElementById('confirm-connect-btn').addEventListener('click', async () => {
+            const relType = document.getElementById('relation-type-input').value.trim();
+            const statusEl = document.getElementById('connect-status');
+            if (!relType) {
+                statusEl.textContent = '请输入关系名称。';
+                return;
+            }
+            await createEdge(fromNode, toNode, relType, statusEl);
+        });
+    }
+
+    async function createEdge(fromNode, toNode, relType, statusEl) {
+        statusEl.textContent = '正在创建关系...';
+        try {
+            const payload = {
+                from_id: fromNode.id,
+                to_id: toNode.id,
+                rel_type: relType,
+                from_type: fromNode.type,
+                to_type: toNode.type
+            };
+            const res = await fetch('/api/edge', {
+                method: 'POST',
+                headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) {
+                const errorData = await res.json();
+                throw new Error(errorData.detail || `服务器错误: ${res.statusText}`);
+            }
+
+            statusEl.textContent = '关系创建成功！图谱将自动刷新。';
+            setTimeout(() => {
+                closeModal();
+                el.reloadBtn.click();
+            }, 1500);
+
+        } catch (err) {
+            statusEl.textContent = `错误: ${err.message}`;
+        }
+    }
 
     function logout() {
         state.isLoggedIn = false;
-        localStorage.removeItem('session_token');
+        sessionStorage.removeItem('session_token');
         document.cookie = 'session_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
         if (state.Graph) {
             state.Graph._destructor();
@@ -360,13 +411,33 @@
             .linkDirectionalParticles(link => state.highlightLinks.has(link) ? 3 : 0)
             .linkDirectionalParticleWidth(3)
             .onNodeClick(node => {
-                state.selectedNode = node;
-                highlightNetwork(node);
-                focusNode(node);
-                switchTab('info');
-                // 自动展开侧边栏（如果关闭）
-                if (!state.sidebarOpen) toggleSidebar();
-                renderNodeInfo();
+                if (state.isConnecting) {
+                    if (!state.connectionStartNode) {
+                        // 选择第一个节点
+                        state.connectionStartNode = node;
+                        alert(`已选择起始节点: ${node.name}。请点击第二个节点以完成连接。`);
+                        // 高亮选中的节点
+                        highlightNetwork(node);
+                    } else {
+                        // 选择第二个节点
+                        if (state.connectionStartNode.id === node.id) return; // 不能连接自身
+                        showConnectNodesModal(state.connectionStartNode, node);
+                        // 重置连接状态
+                        state.isConnecting = false;
+                        state.connectionStartNode = null;
+                        el.connectNodesBtn.classList.remove('active');
+                        el.connectNodesBtn.innerHTML = `<i data-lucide="share-2" style="width: 0.875rem; height: 0.875rem;"></i><span>连接节点</span>`;
+                        lucide.createIcons();
+                    }
+                } else {
+                    // 正常点击逻辑
+                    state.selectedNode = node;
+                    highlightNetwork(node);
+                    focusNode(node);
+                    switchTab('info');
+                    if (!state.sidebarOpen) toggleSidebar();
+                    renderNodeInfo();
+                }
             })
             .onNodeHover(node => {
                 state.hoverNode = node;
@@ -612,7 +683,12 @@
             </div>
             
             <div style="margin-bottom: 1.5rem;">
-                <h4 style="font-size: 0.625rem; font-weight: 700; color: #666; margin-bottom: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase;">Properties</h4>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                    <h4 style="font-size: 0.625rem; font-weight: 700; color: #666; letter-spacing: 0.1em; text-transform: uppercase;">Properties</h4>
+                    <button id="edit-node-btn" class="icon-btn" title="Edit Properties">
+                        <i data-lucide="edit" style="width: 0.875rem; height: 0.875rem;"></i>
+                    </button>
+                </div>
                 <div id="node-properties"></div>
             </div>
             
@@ -625,19 +701,69 @@
                 <h4 style="font-size: 0.625rem; font-weight: 700; color: #666; margin-bottom: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase;">Connected Nodes</h4>
                 <div id="node-neighbors"></div>
             </div>
+            <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid rgba(0,0,0,0.05);">
+                 <button id="delete-node-btn" class="btn btn-secondary" style="background: rgba(239,68,68,0.1); color: #ef4444;">
+                    <i data-lucide="trash-2" style="width: 0.875rem; height: 0.875rem;"></i>
+                    <span>删除节点</span>
+                </button>
+            </div>
         `;
         
         const propsContainer = document.getElementById('node-properties');
-        if (node.properties && Object.keys(node.properties).length > 0) {
-            Object.entries(node.properties).forEach(([key, value]) => {
-                const div = document.createElement('div');
-                div.style.cssText = 'margin-bottom: 0.5rem; font-size: 0.75rem;';
-                div.innerHTML = `<span style="color: #999;">${key}:</span> <span>${JSON.stringify(value)}</span>`;
-                propsContainer.appendChild(div);
-            });
-        } else {
-            propsContainer.innerHTML = '<div style="color: #999; font-size: 0.75rem;">No properties</div>';
-        }
+        propsContainer.innerHTML = ''; // Clear before rendering
+
+        const renderProperties = (editing = false) => {
+            propsContainer.innerHTML = '';
+            const editableProps = ['summary', 'type', 'text']; // Define which properties are editable
+            
+            let hasEditable = false;
+            if (node.properties && Object.keys(node.properties).length > 0) {
+                Object.entries(node.properties).forEach(([key, value]) => {
+                    const div = document.createElement('div');
+                    div.style.cssText = 'margin-bottom: 0.5rem; font-size: 0.75rem; display: flex; flex-direction: column;';
+                    
+                    if (editing && editableProps.includes(key)) {
+                        hasEditable = true;
+                        div.innerHTML = `
+                            <label style="color: #999; font-size: 0.625rem; margin-bottom: 0.25rem;">${key}</label>
+                            <input type="text" data-prop-key="${key}" value="${value}" style="width: 100%; padding: 0.25rem; border: 1px solid #ccc; border-radius: 0.25rem; background: transparent; color: inherit;">
+                        `;
+                    } else {
+                        div.innerHTML = `<span style="color: #999;">${key}:</span> <span>${JSON.stringify(value)}</span>`;
+                    }
+                    propsContainer.appendChild(div);
+                });
+            }
+            
+            if (!hasEditable && editing) {
+                propsContainer.innerHTML = '<div style="color: #999; font-size: 0.75rem;">No editable properties for this node type.</div>';
+            } else if (!node.properties || Object.keys(node.properties).length === 0) {
+                 propsContainer.innerHTML = '<div style="color: #999; font-size: 0.75rem;">No properties</div>';
+            }
+
+            if (editing) {
+                const buttonContainer = document.createElement('div');
+                buttonContainer.style.marginTop = '1rem';
+                buttonContainer.innerHTML = `
+                    <button id="save-props-btn" class="btn btn-primary">Save</button>
+                    <button id="cancel-edit-btn" class="btn btn-secondary" style="margin-top: 0.5rem;">Cancel</button>
+                `;
+                propsContainer.appendChild(buttonContainer);
+
+                document.getElementById('save-props-btn').addEventListener('click', () => saveNodeProperties(node));
+                document.getElementById('cancel-edit-btn').addEventListener('click', () => {
+                    state.isEditingNode = false;
+                    renderNodeInfo();
+                });
+            }
+        };
+
+        renderProperties(state.isEditingNode);
+
+        document.getElementById('edit-node-btn').addEventListener('click', () => {
+            state.isEditingNode = !state.isEditingNode;
+            renderProperties(state.isEditingNode);
+        });
         
         const obsContainer = document.getElementById('node-observations');
         if (node.observations && node.observations.length > 0) {
@@ -658,6 +784,36 @@
         });
         
         const neighborsContainer = document.getElementById('node-neighbors');
+        neighborsContainer.innerHTML = ''; // Clear before rendering
+
+        // Add listener for the main node delete button
+        document.getElementById('delete-node-btn').addEventListener('click', async () => {
+            if (!state.selectedNode) return;
+            
+            const confirmed = confirm(`确定要删除节点 "${state.selectedNode.name}" 吗？此操作不可撤销。`);
+            if (confirmed) {
+                try {
+                    const res = await fetch(`/api/node/${state.selectedNode.type}/${state.selectedNode.id}`, {
+                        method: 'DELETE',
+                        headers: getAuthHeaders()
+                    });
+
+                    if (!res.ok) {
+                        const errData = await res.json();
+                        throw new Error(errData.detail || '删除失败');
+                    }
+                    
+                    alert('节点删除成功！');
+                    state.selectedNode = null;
+                    renderNodeInfo();
+                    el.reloadBtn.click(); // 刷新图谱
+
+                } catch (err) {
+                    alert(`删除节点时出错: ${err.message}`);
+                }
+            }
+        });
+
         if (neighbors.length > 0) {
             neighbors.forEach(link => {
                 const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
@@ -666,22 +822,67 @@
                 const otherNode = state.graphData.nodes.find(n => n.id === otherId);
                 if (otherNode) {
                     const div = document.createElement('div');
-                    div.style.cssText = 'margin-bottom: 0.5rem; padding: 0.5rem; background: rgba(0,0,0,0.03); border-radius: 0.375rem; cursor: pointer; transition: background 0.2s; font-size: 0.75rem;';
-                    div.innerHTML = `<span style="font-weight: 500;">${otherNode.name}</span> <span style="color: #999; font-size: 0.625rem;">(${link.relation})</span>`;
+                    div.style.cssText = 'display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem; padding: 0.5rem; background: rgba(0,0,0,0.03); border-radius: 0.375rem; transition: background 0.2s; font-size: 0.75rem;';
                     div.addEventListener('mouseenter', () => div.style.background = 'rgba(0,0,0,0.06)');
                     div.addEventListener('mouseleave', () => div.style.background = 'rgba(0,0,0,0.03)');
-                    div.addEventListener('click', () => {
+
+                    const infoSpan = document.createElement('span');
+                    infoSpan.style.cursor = 'pointer';
+                    infoSpan.style.flexGrow = '1';
+                    infoSpan.innerHTML = `<span style="font-weight: 500;">${otherNode.name}</span> <span style="color: #999; font-size: 0.625rem;">(${(link.relation || link.label)})</span>`;
+                    infoSpan.addEventListener('click', () => {
                         state.selectedNode = otherNode;
                         highlightNetwork(otherNode);
                         focusNode(otherNode);
                         renderNodeInfo();
                     });
+
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.classList.add('icon-btn');
+                    deleteBtn.style.color = '#ef4444';
+                    deleteBtn.style.width = '1.5rem';
+                    deleteBtn.style.height = '1.5rem';
+                    deleteBtn.title = 'Delete relationship';
+                    deleteBtn.innerHTML = `<i data-lucide="x" style="width: 0.875rem; height: 0.875rem;"></i>`;
+                    deleteBtn.addEventListener('click', async () => {
+                        const confirmed = confirm(`Delete relationship "${(link.relation || link.label)}" between "${node.name}" and "${otherNode.name}"?`);
+                        if (confirmed) {
+                            const fromNode = state.graphData.nodes.find(n => n.id === sourceId);
+                            const toNode = state.graphData.nodes.find(n => n.id === targetId);
+                            const params = new URLSearchParams({
+                                from_id: sourceId,
+                                to_id: targetId,
+                                rel_type: (link.relation || link.label),
+                                from_type: fromNode.type,
+                                to_type: toNode.type
+                            });
+                            try {
+                                const res = await fetch(`/api/edge?${params.toString()}`, {
+                                    method: 'DELETE',
+                                    headers: getAuthHeaders()
+                                });
+                                if (!res.ok) {
+                                    const errData = await res.json();
+                                    throw new Error(errData.detail || 'Failed to delete edge');
+                                }
+                                alert('Relationship deleted.');
+                                el.reloadBtn.click();
+                            } catch (err) {
+                                alert(`Error: ${err.message}`);
+                            }
+                        }
+                    });
+
+                    div.appendChild(infoSpan);
+                    div.appendChild(deleteBtn);
                     neighborsContainer.appendChild(div);
                 }
             });
         } else {
             neighborsContainer.innerHTML = '<div style="color: #999; font-size: 0.75rem;">No connections</div>';
         }
+        
+        lucide.createIcons(); // Render all icons at the end
     }
     
     function performSearch(query) {
@@ -829,7 +1030,59 @@
         if (state.Graph) state.Graph.zoomToFit(400);
     });
 
+    async function saveNodeProperties(node) {
+        const propsContainer = document.getElementById('node-properties');
+        const inputs = propsContainer.querySelectorAll('input[data-prop-key]');
+        const propertiesToUpdate = {};
+        
+        inputs.forEach(input => {
+            propertiesToUpdate[input.dataset.propKey] = input.value;
+        });
+
+        if (Object.keys(propertiesToUpdate).length === 0) {
+            alert('没有要更新的属性。');
+            return;
+        }
+
+        try {
+            const res = await fetch(`/api/node/${node.type}/${node.id}`, {
+                method: 'PATCH',
+                headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+                body: JSON.stringify(propertiesToUpdate)
+            });
+
+            if (!res.ok) {
+                const errData = await res.json();
+                throw new Error(errData.detail || '更新失败');
+            }
+
+            alert('属性更新成功！');
+            state.isEditingNode = false;
+            // 刷新图谱以显示更新
+            el.reloadBtn.click();
+
+        } catch (err) {
+            alert(`更新属性时出错: ${err.message}`);
+        }
+    }
+
     el.toolsBtn.addEventListener('click', showBatchOperationsModal);
+    el.linkEntityBtn.addEventListener('click', showLinkEntityModal);
+
+    el.connectNodesBtn.addEventListener('click', () => {
+        state.isConnecting = !state.isConnecting;
+        state.connectionStartNode = null; // 每次切换都重置
+        if (state.isConnecting) {
+            el.connectNodesBtn.classList.add('active');
+            el.connectNodesBtn.innerHTML = `<i data-lucide="x" style="width: 0.875rem; height: 0.875rem;"></i><span>取消连接</span>`;
+            alert('连接模式已激活。请依次点击两个节点以创建关系。');
+        } else {
+            el.connectNodesBtn.classList.remove('active');
+            el.connectNodesBtn.innerHTML = `<i data-lucide="share-2" style="width: 0.875rem; height: 0.875rem;"></i><span>连接节点</span>`;
+        }
+        lucide.createIcons();
+    });
+
     el.modalCloseBtn.addEventListener('click', closeModal);
     el.modalOverlay.addEventListener('click', (e) => {
         if (e.target === el.modalOverlay) {

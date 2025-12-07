@@ -152,36 +152,47 @@ LINK_ENTITY_TO_SESSION = """
     MERGE (s)-[:CONTAINS_ENTITY]->(e)
 """
 
-# 获取指定会话的完整子图基础信息（节点和部分关系）。
-GET_FULL_GRAPH_BASE = """
+# 为 WebUI 获取指定会话的所有相关节点 - 分为三个独立查询
+GET_SESSION_GRAPH_NODES_PART1 = """
     MATCH (s:Session {id: $sid})
-    OPTIONAL MATCH (u:User)-[:SENT]->(m:Message)-[:POSTED_IN]->(s)
-    OPTIONAL MATCH (m)-[r_mentions:MENTIONS]->(e:Entity)
-    OPTIONAL MATCH (s)-[r_has_mem:SESSION_HAS_MEMORY]->(mf:MemoryFragment)
-    OPTIONAL MATCH (s)-[:CONTAINS_ENTITY]->(e_manual:Entity)
-    RETURN s, u, m, r_mentions, e, r_has_mem, mf, e_manual
+    RETURN s AS node
+"""
+
+GET_SESSION_GRAPH_NODES_PART2 = """
+    MATCH (s:Session {id: $sid})--(n)
+    RETURN n AS node
+"""
+
+GET_SESSION_GRAPH_NODES_PART3 = """
+    MATCH (s:Session {id: $sid})<-[:POSTED_IN]-(:Message)-[:MENTIONS]->(e:Entity)
+    RETURN e AS node
+"""
+
+# 为 WebUI 获取指定会话的所有相关关系 - 分为三个独立查询
+GET_SESSION_GRAPH_EDGES_PART1 = """
+    MATCH (s:Session {id: $sid})-[r]-(n)
+    RETURN s AS a, r, n AS b
+"""
+
+GET_SESSION_GRAPH_EDGES_PART2 = """
+    MATCH (s:Session {id: $sid})<-[:POSTED_IN]-(m:Message)-[r:MENTIONS]->(e:Entity)
+    RETURN m AS a, r, e AS b
+"""
+
+GET_SESSION_GRAPH_EDGES_PART3 = """
+    MATCH (s:Session {id: $sid})<-[:POSTED_IN]-(:Message)-[:MENTIONS]->(e1:Entity)-[r:RELATED_TO]->(e2:Entity)
+    RETURN e1 AS a, r, e2 AS b
 """
 
 # 优化后的全局图谱查询：仅查询 Entity 和 MemoryFragment 及其关系，忽略 Message 以减少数据量。
 GET_GLOBAL_GRAPH_OPTIMIZED_NODES = """
-    MATCH (n)
-    WHERE n:Entity OR n:MemoryFragment
+    MATCH (n:Entity|MemoryFragment)
     RETURN n
 """
 
 GET_GLOBAL_GRAPH_OPTIMIZED_EDGES = """
-    MATCH (a)-[r]->(b)
-    WHERE (a:Entity OR a:MemoryFragment) AND (b:Entity OR b:MemoryFragment)
+    MATCH (a:Entity|MemoryFragment)-[r]->(b:Entity|MemoryFragment)
     RETURN a, r, b
-"""
-
-# 获取指定会话中实体之间的 `RELATED_TO` 关系。
-GET_FULL_GRAPH_RELATIONS = """
-    MATCH (s:Session {id: $sid})
-    MATCH (m:Message)-[:POSTED_IN]->(s)
-    MATCH (m)-[:MENTIONS]->(e1:Entity)
-    MATCH (e1)-[r:RELATED_TO]->(e2:Entity)
-    RETURN e1, r, e2
 """
 
 # 根据 ID 和类型删除一个节点。

@@ -5,12 +5,12 @@
 为图记忆插件提供一个可视化的 Web 界面（WebUI）。
 """
 
+import asyncio
 import os
+import platform
 import secrets
 import string
 import threading
-import platform
-import asyncio
 
 from fastapi import (
     Depends,
@@ -23,12 +23,22 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from pydantic import BaseModel
 
 from astrbot.api import logger
 
 from .graph_engine import GraphEngine
 from .graph_service import GraphService
 from .monitoring_service import monitoring_service
+
+
+# --- Pydantic Models for Request Bodies ---
+class CreateEdgePayload(BaseModel):
+    from_id: str
+    to_id: str
+    rel_type: str
+    from_type: str
+    to_type: str
 
 
 class WebServer:
@@ -237,6 +247,24 @@ class WebServer:
                 logger.error(f"[GraphMemory WebUI] 关联实体失败: {e}", exc_info=True)
                 raise HTTPException(status_code=500, detail=str(e))
 
+        @self.app.post("/api/edge")
+        async def create_edge(payload: CreateEdgePayload, _: bool = Depends(self._check_auth)):
+            """API: 在两个节点之间创建一条新的关系（边）。"""
+            try:
+                await self.service.create_edge(
+                    payload.from_id,
+                    payload.to_id,
+                    payload.rel_type,
+                    payload.from_type,
+                    payload.to_type,
+                )
+                return {"status": "success"}
+            except NotImplementedError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+            except Exception as e:
+                logger.error(f"[GraphMemory WebUI] 创建关系失败: {e}", exc_info=True)
+                raise HTTPException(status_code=500, detail=str(e))
+
         # --- 监控 WebSocket API ---
         @self.app.websocket("/ws/status")
         async def websocket_endpoint(websocket: WebSocket):
@@ -257,15 +285,15 @@ class WebServer:
         # 在 Windows 上，为这个线程创建一个新的 SelectorEventLoop
         if platform.system() == "Windows":
             asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-        
+
         # 为这个线程创建新的事件循环
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        
+
         try:
             # 使用 uvicorn 但在新的事件循环中运行
             import uvicorn
-            
+
             config = uvicorn.Config(
                 app=self.app,
                 host=self.host,
@@ -274,7 +302,7 @@ class WebServer:
                 loop="asyncio"
             )
             server = uvicorn.Server(config)
-            
+
             # 在当前线程的事件循环中运行服务器
             loop.run_until_complete(server.serve())
         except Exception as e:
