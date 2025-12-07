@@ -3,11 +3,11 @@
     
     const state = {
         isLoggedIn: false,
-        isDark: localStorage.getItem('theme') !== 'light', // 默认为深色，除非明确设置为 light
+        isDark: localStorage.getItem('theme') !== 'light',
         sidebarOpen: true,
         activeTab: 'info',
         graphData: { nodes: [], links: [] },
-        currentSessionId: null, // 新增：当前加载的会话ID
+        currentSessionId: null,
         selectedNode: null,
         hoverNode: null,
         highlightNodes: new Set(),
@@ -15,14 +15,12 @@
         debugResult: null,
         showLabels: true,
         Graph: null,
-        isConnecting: false, // 新增：是否处于连接模式
-        connectionStartNode: null, // 新增：连接操作的起始节点
-        isEditingNode: false, // 新增：是否处于节点编辑模式
-        // 监控状态
+        isConnecting: false,
+        connectionStartNode: null,
+        isEditingNode: false,
         ws: null,
         logPaused: false,
         logLevel: 'ALL',
-        // 存储从 WebSocket 收到的原始日志数据
         logCache: []
     };
     
@@ -44,8 +42,6 @@
         nodeInfoEmpty: document.getElementById('node-info-empty'),
         nodeInfoDetail: document.getElementById('node-info-detail'),
         debugQuery: document.getElementById('debug-query'),
-        debugSession: document.getElementById('debug-session'), // 新增
-        debugPersona: document.getElementById('debug-persona'), // 新增
         debugSearchBtn: document.getElementById('debug-search-btn'),
         debugLoader: document.getElementById('debug-loader'),
         debugText: document.getElementById('debug-text'),
@@ -60,7 +56,6 @@
         reloadBtn: document.getElementById('reload-btn'),
         fitViewBtn: document.getElementById('fit-view-btn'),
         tooltip: document.getElementById('tooltip'),
-        // 监控面板元素
         monitorLogs: document.getElementById('monitor-logs'),
         monitorTasks: document.getElementById('monitor-tasks'),
         monitorMessages: document.getElementById('monitor-messages'),
@@ -70,11 +65,10 @@
         toolsBtn: document.getElementById('tools-btn'),
         linkEntityBtn: document.getElementById('link-entity-btn'),
         connectNodesBtn: document.getElementById('connect-nodes-btn'),
-        modalOverlay: document.getElementById('modal-overlay'),
-        modalBox: document.getElementById('modal-box'),
-        modalTitle: document.getElementById('modal-title'),
-        modalContent: document.getElementById('modal-content'),
-        modalCloseBtn: document.getElementById('modal-close-btn')
+        rightPanel: document.getElementById('right-panel'),
+        rightPanelClose: document.getElementById('right-panel-close'),
+        rightPanelContent: document.getElementById('right-panel-content'),
+        toastContainer: document.getElementById('toast-container')
     };
     
     function getAuthHeaders() {
@@ -82,11 +76,65 @@
         return token ? { 'Authorization': `Bearer ${token}` } : {};
     }
     
+    // Toast 通知系统
+    function showToast(title, message, type = 'info', duration = 4000) {
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        
+        const iconMap = {
+            success: 'check-circle',
+            error: 'alert-circle',
+            warning: 'alert-triangle',
+            info: 'info'
+        };
+        
+        toast.innerHTML = `
+            <i data-lucide="${iconMap[type]}" class="toast-icon"></i>
+            <div class="toast-content">
+                <div class="toast-title">${title}</div>
+                ${message ? `<div class="toast-message">${message}</div>` : ''}
+            </div>
+            <button class="toast-close">
+                <i data-lucide="x" style="width: 1rem; height: 1rem;"></i>
+            </button>
+        `;
+        
+        el.toastContainer.appendChild(toast);
+        lucide.createIcons();
+        
+        const closeBtn = toast.querySelector('.toast-close');
+        const removeToast = () => {
+            toast.classList.add('removing');
+            setTimeout(() => toast.remove(), 300);
+        };
+        
+        closeBtn.addEventListener('click', removeToast);
+        
+        if (duration > 0) {
+            setTimeout(removeToast, duration);
+        }
+        
+        return toast;
+    }
+
+    // 右侧面板管理
+    function openRightPanel(content) {
+        el.rightPanelContent.innerHTML = content;
+        el.rightPanel.classList.add('open');
+        lucide.createIcons();
+    }
+
+    function closeRightPanel() {
+        el.rightPanel.classList.remove('open');
+        setTimeout(() => {
+            el.rightPanelContent.innerHTML = '';
+        }, 400);
+    }
+    
     async function checkSession() {
         let token = sessionStorage.getItem('session_token');
         if (token) {
             try {
-                // Use a valid, lightweight endpoint for session checking
                 const res = await fetch('/api/contexts', { headers: getAuthHeaders() });
                 if (res.ok) {
                     state.isLoggedIn = true;
@@ -96,7 +144,6 @@
             } catch (e) {
                 console.error('会话验证失败:', e);
             }
-            // If check fails, clear the invalid token
             sessionStorage.removeItem('session_token');
         }
     }
@@ -126,36 +173,37 @@
         }
     }
 
-    function openModal(title, content) {
-        el.modalTitle.textContent = title;
-        el.modalContent.innerHTML = content;
-        el.modalOverlay.classList.remove('hidden');
-    }
-
-    function closeModal() {
-        el.modalOverlay.classList.add('hidden');
-        el.modalContent.innerHTML = '';
-    }
-
-    function showBatchOperationsModal() {
+    function showBatchOperationsPanel() {
         const content = `
-            <p style="font-size: 0.875rem; color: #999; margin-bottom: 1.5rem;">选择一个预设的维护任务来清理当前图谱。</p>
-            <div style="display: flex; flex-direction: column; gap: 0.75rem;">
-                <button class="btn btn-secondary" data-task="delete_isolated_entities">删除孤立实体</button>
-                <button class="btn btn-secondary" data-task="delete_old_messages" data-days="90">删除90天前的原始消息</button>
+            <div class="tool-section">
+                <div class="tool-section-title">批量操作</div>
+                <div class="tool-item" data-task="delete_isolated_entities">
+                    <i data-lucide="trash-2" class="tool-item-icon"></i>
+                    <div class="tool-item-content">
+                        <div class="tool-item-title">删除孤立实体</div>
+                        <div class="tool-item-desc">清理没有任何连接的节点</div>
+                    </div>
+                </div>
+                <div class="tool-item" data-task="delete_old_messages" data-days="90">
+                    <i data-lucide="clock" class="tool-item-icon"></i>
+                    <div class="tool-item-content">
+                        <div class="tool-item-title">删除旧消息</div>
+                        <div class="tool-item-desc">删除90天前的原始消息</div>
+                    </div>
+                </div>
             </div>
-            <div id="batch-op-status" style="margin-top: 1rem; font-size: 0.75rem; color: #666;"></div>
+            <div id="batch-op-status" class="status-message hidden"></div>
         `;
-        openModal('高级工具', content);
-        lucide.createIcons();
+        openRightPanel(content);
 
-        document.querySelectorAll('#modal-content .btn[data-task]').forEach(button => {
-            button.addEventListener('click', async (e) => {
+        document.querySelectorAll('.tool-item[data-task]').forEach(item => {
+            item.addEventListener('click', async (e) => {
                 const taskName = e.currentTarget.dataset.task;
                 const days = e.currentTarget.dataset.days;
                 const statusEl = document.getElementById('batch-op-status');
                 
-                statusEl.textContent = `正在执行: ${taskName}...`;
+                statusEl.classList.remove('hidden', 'success', 'error');
+                statusEl.textContent = `正在执行任务...`;
                 
                 try {
                     const params = days ? { days: parseInt(days) } : {};
@@ -168,91 +216,116 @@
                     if (!res.ok) throw new Error(`服务器错误: ${res.statusText}`);
                     
                     const result = await res.json();
-                    statusEl.textContent = `成功！删除了 ${result.deleted_count} 个节点。图谱将自动刷新。`;
-
-                    // 等待一会再刷新，让用户看到成功信息
+                    statusEl.classList.add('success');
+                    statusEl.textContent = `成功删除 ${result.deleted_count} 个节点`;
+                    
+                    showToast('操作成功', `已删除 ${result.deleted_count} 个节点`, 'success');
+                    
                     setTimeout(() => {
-                        closeModal();
-                        el.reloadBtn.click(); // 触发刷新
+                        closeRightPanel();
+                        el.reloadBtn.click();
                     }, 2000);
 
                 } catch (err) {
+                    statusEl.classList.add('error');
                     statusEl.textContent = `错误: ${err.message}`;
+                    showToast('操作失败', err.message, 'error');
                 }
             });
         });
     }
 
-    function showLinkEntityModal() {
+    function showLinkEntityPanel() {
         if (!state.selectedNode || state.selectedNode.type !== 'Entity') {
-            alert('请先选择一个实体节点。');
+            showToast('无法关联', '请先选择一个实体节点', 'warning');
             return;
         }
         
         const entityName = state.selectedNode.name;
         const content = `
-            <p style="font-size: 0.875rem; color: #999; margin-bottom: 1.5rem;">将实体 <strong>${entityName}</strong> 关联到当前会话。</p>
-            <div style="margin-bottom: 1rem;">
-                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.5rem;">目标会话 ID</label>
-                <input type="text" id="link-session-id" value="${state.currentSessionId !== 'global' ? state.currentSessionId : ''}" style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 0.25rem; background: transparent; color: inherit;">
+            <div class="tool-section">
+                <div class="tool-section-title">关联实体到会话</div>
+                <p style="font-size: 0.875rem; color: #666; margin-bottom: 1.5rem;">
+                    将实体 <strong>${entityName}</strong> 关联到指定会话
+                </p>
+                <div class="form-group">
+                    <label class="form-label">目标会话 ID</label>
+                    <input type="text" id="link-session-id" class="form-input" 
+                           value="${state.currentSessionId !== 'global' ? state.currentSessionId : ''}" 
+                           placeholder="输入会话ID...">
+                </div>
+                <button id="confirm-link-btn" class="btn btn-primary">确认关联</button>
+                <div id="link-status" class="status-message hidden"></div>
             </div>
-            <button id="confirm-link-btn" class="btn btn-primary">确认关联</button>
-            <div id="link-status" style="margin-top: 1rem; font-size: 0.75rem; color: #666;"></div>
         `;
-        openModal('关联实体', content);
+        openRightPanel(content);
         
         document.getElementById('confirm-link-btn').addEventListener('click', async () => {
             const sessionId = document.getElementById('link-session-id').value.trim();
             const statusEl = document.getElementById('link-status');
             
             if (!sessionId) {
-                statusEl.textContent = '请输入会话 ID。';
+                statusEl.classList.remove('hidden', 'success');
+                statusEl.classList.add('error');
+                statusEl.textContent = '请输入会话 ID';
                 return;
             }
             
+            statusEl.classList.remove('hidden', 'success', 'error');
             statusEl.textContent = '正在关联...';
             
             try {
                 const res = await fetch('/api/link', {
                     method: 'POST',
-                    headers: { ...getAuth-headers(), 'Content-Type': 'application/json' },
+                    headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
                     body: JSON.stringify({ session_id: sessionId, entity_name: entityName })
                 });
                 
                 if (!res.ok) throw new Error(`服务器错误: ${res.statusText}`);
                 
+                statusEl.classList.add('success');
                 statusEl.textContent = '关联成功！';
+                showToast('关联成功', `实体已关联到会话 ${sessionId}`, 'success');
+                
                 setTimeout(() => {
-                    closeModal();
+                    closeRightPanel();
                     if (state.currentSessionId === sessionId) {
                         el.reloadBtn.click();
                     }
                 }, 1500);
             } catch (err) {
+                statusEl.classList.add('error');
                 statusEl.textContent = `错误: ${err.message}`;
+                showToast('关联失败', err.message, 'error');
             }
         });
     }
 
-    function showConnectNodesModal(fromNode, toNode) {
+    function showConnectNodesPanel(fromNode, toNode) {
         const content = `
-            <p style="font-size: 0.875rem; color: #999; margin-bottom: 1.5rem;">
-                创建从 <strong>${fromNode.name}</strong> 到 <strong>${toNode.name}</strong> 的关系。
-            </p>
-            <div style="margin-bottom: 1rem;">
-                <label style="display: block; font-size: 0.75rem; font-weight: 600; margin-bottom: 0.5rem;">关系名称 (例如: IS_A, PART_OF)</label>
-                <input type="text" id="relation-type-input" placeholder="输入关系名称..." style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 0.25rem; background: transparent; color: inherit;">
+            <div class="tool-section">
+                <div class="tool-section-title">连接节点</div>
+                <p style="font-size: 0.875rem; color: #666; margin-bottom: 1.5rem;">
+                    创建从 <strong>${fromNode.name}</strong> 到 <strong>${toNode.name}</strong> 的关系
+                </p>
+                <div class="form-group">
+                    <label class="form-label">关系类型</label>
+                    <input type="text" id="relation-type-input" class="form-input" 
+                           placeholder="例如: IS_A, PART_OF, RELATED_TO">
+                </div>
+                <button id="confirm-connect-btn" class="btn btn-primary">创建关系</button>
+                <div id="connect-status" class="status-message hidden"></div>
             </div>
-            <button id="confirm-connect-btn" class="btn btn-primary">创建关系</button>
-            <div id="connect-status" style="margin-top: 1rem; font-size: 0.75rem; color: #666;"></div>
         `;
-        openModal('连接节点', content);
+        openRightPanel(content);
 
         document.getElementById('confirm-connect-btn').addEventListener('click', async () => {
             const relType = document.getElementById('relation-type-input').value.trim();
             const statusEl = document.getElementById('connect-status');
             if (!relType) {
-                statusEl.textContent = '请输入关系名称。';
+                statusEl.classList.remove('hidden', 'success');
+                statusEl.classList.add('error');
+                statusEl.textContent = '请输入关系名称';
                 return;
             }
             await createEdge(fromNode, toNode, relType, statusEl);
@@ -260,7 +333,9 @@
     }
 
     async function createEdge(fromNode, toNode, relType, statusEl) {
+        statusEl.classList.remove('hidden', 'success', 'error');
         statusEl.textContent = '正在创建关系...';
+        
         try {
             const payload = {
                 from_id: fromNode.id,
@@ -280,14 +355,19 @@
                 throw new Error(errorData.detail || `服务器错误: ${res.statusText}`);
             }
 
-            statusEl.textContent = '关系创建成功！图谱将自动刷新。';
+            statusEl.classList.add('success');
+            statusEl.textContent = '关系创建成功！';
+            showToast('创建成功', `已创建 ${relType} 关系`, 'success');
+            
             setTimeout(() => {
-                closeModal();
+                closeRightPanel();
                 el.reloadBtn.click();
             }, 1500);
 
         } catch (err) {
+            statusEl.classList.add('error');
             statusEl.textContent = `错误: ${err.message}`;
+            showToast('创建失败', err.message, 'error');
         }
     }
 
@@ -306,9 +386,7 @@
     function showMainApp() {
         el.loginScreen.classList.add('hidden');
         el.mainApp.classList.remove('hidden');
-        // Initialize the app logic (fetch contexts, then load graph)
         initApp();
-        // 连接 WebSocket
         connectWebSocket();
     }
     
@@ -323,13 +401,9 @@
         if (state.Graph) {
             const bgColor = state.isDark ? '#080808' : '#f2f2f2';
             state.Graph.backgroundColor(bgColor);
-            
-            // 强制刷新画布对象以更新颜色
-            // ForceGraph 的访问器函数会在内部调用时使用当前的 state.isDark
-            // 重新设置访问器会触发内部更新
             state.Graph.nodeColor(state.Graph.nodeColor());
             state.Graph.linkColor(state.Graph.linkColor());
-            state.Graph.nodeCanvasObject(state.Graph.nodeCanvasObject()); // 触发自定义绘制更新
+            state.Graph.nodeCanvasObject(state.Graph.nodeCanvasObject());
         }
     }
     
@@ -368,23 +442,19 @@
         el.graphContainer.innerHTML = '';
         
         const getNodeColor = (node) => {
-            // 非高亮状态下的淡化处理
             if (state.highlightNodes.size > 0 && !state.highlightNodes.has(node.id)) {
                 return state.isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
             }
-            // 选中节点：黑白强对比
             if (node === state.selectedNode) return state.isDark ? '#fff' : '#000';
             
-            // 基于类型的低饱和度高级配色方案 (Morandi-inspired)
             const type = (node.type || '').toLowerCase();
             
-            if (type.includes('concept') || type.includes('memory')) return '#818cf8'; // Indigo
-            if (type.includes('action') || type.includes('event')) return '#34d399'; // Emerald
-            if (type.includes('persona') || type.includes('user')) return '#60a5fa'; // Blue
-            if (type.includes('loc') || type.includes('place')) return '#f472b6'; // Pink
-            if (type.includes('time') || type.includes('date')) return '#fcd34d'; // Amber (Muted)
+            if (type.includes('concept') || type.includes('memory')) return '#818cf8';
+            if (type.includes('action') || type.includes('event')) return '#34d399';
+            if (type.includes('persona') || type.includes('user')) return '#60a5fa';
+            if (type.includes('loc') || type.includes('place')) return '#f472b6';
+            if (type.includes('time') || type.includes('date')) return '#fcd34d';
             
-            // 默认/其他类型：中性冷灰
             return '#9ca3af';
         };
         
@@ -394,11 +464,8 @@
             if (isDimmed) {
                 return state.isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
             }
-            // 提高默认可见度
             return state.isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)';
         };
-        
-        const getTextColor = () => state.isDark ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.8)';
         
         state.Graph = ForceGraph()(el.graphContainer)
             .backgroundColor(state.isDark ? '#080808' : '#f2f2f2')
@@ -413,16 +480,15 @@
             .onNodeClick(node => {
                 if (state.isConnecting) {
                     if (!state.connectionStartNode) {
-                        // 选择第一个节点
                         state.connectionStartNode = node;
-                        alert(`已选择起始节点: ${node.name}。请点击第二个节点以完成连接。`);
-                        // 高亮选中的节点
+                        showToast('已选择起始节点', `${node.name}，请点击第二个节点`, 'info', 3000);
                         highlightNetwork(node);
                     } else {
-                        // 选择第二个节点
-                        if (state.connectionStartNode.id === node.id) return; // 不能连接自身
-                        showConnectNodesModal(state.connectionStartNode, node);
-                        // 重置连接状态
+                        if (state.connectionStartNode.id === node.id) {
+                            showToast('无法连接', '不能连接节点自身', 'warning');
+                            return;
+                        }
+                        showConnectNodesPanel(state.connectionStartNode, node);
                         state.isConnecting = false;
                         state.connectionStartNode = null;
                         el.connectNodesBtn.classList.remove('active');
@@ -430,7 +496,6 @@
                         lucide.createIcons();
                     }
                 } else {
-                    // 正常点击逻辑
                     state.selectedNode = node;
                     highlightNetwork(node);
                     focusNode(node);
@@ -469,22 +534,18 @@
                 ctx.fillStyle = isDimmed ? (state.isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)') : getNodeColor(node);
                 ctx.fill();
                 
-                // 绘制选中光环
                 if (isSelected) {
-                    // 浅色模式下选中光环改为深色，深色模式下为白色
                     ctx.strokeStyle = state.isDark ? '#fff' : '#333';
                     ctx.lineWidth = 2 / globalScale;
                     ctx.stroke();
                     
                     ctx.beginPath();
                     ctx.arc(node.x, node.y, r * 1.5, 0, 2 * Math.PI, false);
-                    // 外圈光环
                     ctx.strokeStyle = state.isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.1)';
                     ctx.lineWidth = 1 / globalScale;
                     ctx.stroke();
                 }
                 
-                // 绘制标签
                 if (state.showLabels || isSelected || isHighlighted) {
                     const label = node.name;
                     const fontSize = (isSelected ? 14 : 10) / globalScale;
@@ -492,20 +553,17 @@
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'top';
                     
-                    // 动态获取当前主题下的文本颜色
-                    // 必须实时判断，不能缓存
                     const currentTextColor = state.isDark ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.8)';
                     const dimmedColor = state.isDark ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)';
                     
                     ctx.fillStyle = isDimmed ? dimmedColor : currentTextColor;
                     
-                    // 绘制文字背景以提高可读性
                     if (isSelected) {
                         const textWidth = ctx.measureText(label).width;
                         const bgHeight = fontSize * 1.2;
                         ctx.fillStyle = state.isDark ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.8)';
                         ctx.fillRect(node.x - textWidth/2 - 2, node.y + r + 2, textWidth + 4, bgHeight);
-                        ctx.fillStyle = isDimmed ? dimmedColor : currentTextColor; // 恢复文字颜色
+                        ctx.fillStyle = isDimmed ? dimmedColor : currentTextColor;
                     }
                     
                     ctx.fillText(label, node.x, node.y + r + 2);
@@ -527,15 +585,11 @@
             });
             window._resizeListenerAdded = true;
         }
-        
-        // Data loading is now handled by initApp and loadGraphData
     }
     
     async function initApp() {
-        // 1. 立即初始化空的图谱画布
         initGraph();
 
-        // 2. 异步、非阻塞地获取会话列表并填充下拉菜单
         try {
             const res = await fetch('/api/contexts', { headers: getAuthHeaders() });
             if (!res.ok) {
@@ -549,7 +603,6 @@
                     contexts.forEach(ctx => {
                         const option = document.createElement('option');
                         option.value = ctx.session_id;
-                        // 截断过长的 ID 以优化显示
                         const displayName = ctx.session_id.length > 30 ? `...${ctx.session_id.slice(-27)}` : ctx.session_id;
                         option.textContent = displayName;
                         el.sessionSelector.appendChild(option);
@@ -562,15 +615,13 @@
             console.error("填充会话下拉菜单时出错:", e);
         }
 
-        // 3. 无论会话列表是否获取成功，都默认加载全局视图作为初始状态
         console.log("默认加载全局视图...");
         el.sessionSelector.value = 'global';
         await loadGraphData('global');
     }
     
     async function loadGraphData(sessionId) {
-        // sessionId 可以是一个字符串 ID 或 "global"
-        console.log(`开始加载图谱数据，视图: ${sessionId}`); // 增加诊断日志
+        console.log(`开始加载图谱数据，视图: ${sessionId}`);
         state.currentSessionId = sessionId;
         
         const url = (sessionId && sessionId !== 'global')
@@ -588,7 +639,6 @@
             }
             const data = await res.json();
             
-            // 检查数据是否有效
             if (!data || data === null) {
                 console.error('收到空的图谱数据');
                 state.graphData = { nodes: [], links: [] };
@@ -596,18 +646,15 @@
                 return;
             }
             
-            // 过滤掉无效的节点和边
             const validNodes = (data.nodes || []).filter(n => n && n.id);
             const nodeIds = new Set(validNodes.map(n => n.id));
             
-            // 只保留source和target都存在的边
             const validEdges = (data.edges || []).filter(e =>
                 e && e.source && e.target && nodeIds.has(e.source) && nodeIds.has(e.target)
             );
             
             console.log(`有效节点: ${validNodes.length}, 有效边: ${validEdges.length}`);
             
-            // The backend returns 'edges' with 'source'/'target', force-graph uses 'links'
             state.graphData = {
                 nodes: validNodes,
                 links: validEdges
@@ -621,6 +668,7 @@
     
         } catch (e) {
             console.error('加载图谱数据错误:', e);
+            showToast('加载失败', '无法加载图谱数据', 'error');
         }
     }
     
@@ -710,11 +758,11 @@
         `;
         
         const propsContainer = document.getElementById('node-properties');
-        propsContainer.innerHTML = ''; // Clear before rendering
+        propsContainer.innerHTML = '';
 
         const renderProperties = (editing = false) => {
             propsContainer.innerHTML = '';
-            const editableProps = ['summary', 'type', 'text']; // Define which properties are editable
+            const editableProps = ['summary', 'type', 'text'];
             
             let hasEditable = false;
             if (node.properties && Object.keys(node.properties).length > 0) {
@@ -784,9 +832,8 @@
         });
         
         const neighborsContainer = document.getElementById('node-neighbors');
-        neighborsContainer.innerHTML = ''; // Clear before rendering
+        neighborsContainer.innerHTML = '';
 
-        // Add listener for the main node delete button
         document.getElementById('delete-node-btn').addEventListener('click', async () => {
             if (!state.selectedNode) return;
             
@@ -803,13 +850,13 @@
                         throw new Error(errData.detail || '删除失败');
                     }
                     
-                    alert('节点删除成功！');
+                    showToast('删除成功', '节点已删除', 'success');
                     state.selectedNode = null;
                     renderNodeInfo();
-                    el.reloadBtn.click(); // 刷新图谱
+                    el.reloadBtn.click();
 
                 } catch (err) {
-                    alert(`删除节点时出错: ${err.message}`);
+                    showToast('删除失败', err.message, 'error');
                 }
             }
         });
@@ -865,10 +912,10 @@
                                     const errData = await res.json();
                                     throw new Error(errData.detail || 'Failed to delete edge');
                                 }
-                                alert('Relationship deleted.');
+                                showToast('删除成功', '关系已删除', 'success');
                                 el.reloadBtn.click();
                             } catch (err) {
-                                alert(`Error: ${err.message}`);
+                                showToast('删除失败', err.message, 'error');
                             }
                         }
                     });
@@ -882,7 +929,7 @@
             neighborsContainer.innerHTML = '<div style="color: #999; font-size: 0.75rem;">No connections</div>';
         }
         
-        lucide.createIcons(); // Render all icons at the end
+        lucide.createIcons();
     }
     
     function performSearch(query) {
@@ -921,14 +968,12 @@
         const query = el.debugQuery.value.trim();
         if (!query) return;
 
-        // Always use the currently loaded session ID for debugging
         const sid = state.currentSessionId;
         if (!sid) {
-            alert("Please load a session context first.");
+            showToast('错误', '请先加载会话', 'warning');
             return;
         }
         
-        // 构建查询参数
         let url = `/api/debug_search?q=${encodeURIComponent(query)}&session_id=${encodeURIComponent(sid)}`;
         
         el.debugLoader.classList.remove('hidden');
@@ -956,6 +1001,7 @@
             el.debugText.textContent = '搜索';
             el.debugStats.textContent = '错误: ' + e.message;
             el.debugResult.classList.remove('hidden');
+            showToast('搜索失败', e.message, 'error');
         }
     }
     
@@ -1040,7 +1086,7 @@
         });
 
         if (Object.keys(propertiesToUpdate).length === 0) {
-            alert('没有要更新的属性。');
+            showToast('无法更新', '没有要更新的属性', 'warning');
             return;
         }
 
@@ -1056,26 +1102,25 @@
                 throw new Error(errData.detail || '更新失败');
             }
 
-            alert('属性更新成功！');
+            showToast('更新成功', '属性已更新', 'success');
             state.isEditingNode = false;
-            // 刷新图谱以显示更新
             el.reloadBtn.click();
 
         } catch (err) {
-            alert(`更新属性时出错: ${err.message}`);
+            showToast('更新失败', err.message, 'error');
         }
     }
 
-    el.toolsBtn.addEventListener('click', showBatchOperationsModal);
-    el.linkEntityBtn.addEventListener('click', showLinkEntityModal);
+    el.toolsBtn.addEventListener('click', showBatchOperationsPanel);
+    el.linkEntityBtn.addEventListener('click', showLinkEntityPanel);
 
     el.connectNodesBtn.addEventListener('click', () => {
         state.isConnecting = !state.isConnecting;
-        state.connectionStartNode = null; // 每次切换都重置
+        state.connectionStartNode = null;
         if (state.isConnecting) {
             el.connectNodesBtn.classList.add('active');
             el.connectNodesBtn.innerHTML = `<i data-lucide="x" style="width: 0.875rem; height: 0.875rem;"></i><span>取消连接</span>`;
-            alert('连接模式已激活。请依次点击两个节点以创建关系。');
+            showToast('连接模式', '请依次点击两个节点以创建关系', 'info', 3000);
         } else {
             el.connectNodesBtn.classList.remove('active');
             el.connectNodesBtn.innerHTML = `<i data-lucide="share-2" style="width: 0.875rem; height: 0.875rem;"></i><span>连接节点</span>`;
@@ -1083,14 +1128,9 @@
         lucide.createIcons();
     });
 
-    el.modalCloseBtn.addEventListener('click', closeModal);
-    el.modalOverlay.addEventListener('click', (e) => {
-        if (e.target === el.modalOverlay) {
-            closeModal();
-        }
-    });
+    el.rightPanelClose.addEventListener('click', closeRightPanel);
 
-    // --- WebSocket 和监控功能 ---
+    // WebSocket 和监控功能
 
     function connectWebSocket() {
         if (state.ws && state.ws.readyState === WebSocket.OPEN) return;
@@ -1166,9 +1206,7 @@
     }
 
     function addLogEntry(log) {
-        // 无论当前过滤器是什么，都将日志存入缓存
         state.logCache.push(log);
-        // 如果日志级别匹配当前过滤器，则将其添加到视图
         if (shouldDisplayLog(log)) {
             renderLogEntry(log);
         }
@@ -1209,9 +1247,7 @@
 
     el.logLevelFilter.addEventListener('change', (e) => {
         state.logLevel = e.target.value;
-        // 清空并重新筛选显示
-        el.monitorLogs.innerHTML = '';
-        // 这里可以重新请求历史日志或简单地等待新日志
+        rerenderLogs();
     });
 
     el.logPauseToggle.addEventListener('click', () => {
@@ -1221,11 +1257,11 @@
 
     el.logClear.addEventListener('click', () => {
         el.monitorLogs.innerHTML = '';
+        state.logCache = [];
     });
     
     lucide.createIcons();
     
-    // 初始化主题
     if (state.isDark) {
         document.body.classList.add('dark');
         el.themeToggle.innerHTML = '<i data-lucide="moon" style="width: 1rem; height: 1rem;"></i>';
