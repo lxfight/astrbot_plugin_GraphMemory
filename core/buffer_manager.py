@@ -308,26 +308,28 @@ class BufferManager:
                         result = self._flush_session(conn, session_id)
                         if result:
                             text, is_group, persona = result
-                            await self.flush_callback(session_id, text, is_group, persona)
+                            # 在同步锁中，使用 create_task 避免阻塞
+                            asyncio.create_task(self.flush_callback(session_id, text, is_group, persona))
                         current_count = 0
 
-                # 添加消息到数据库
-                self._add_message_to_db(conn, session_id, msg)
-                self._update_session_info(conn, session_id, msg.is_group, msg.persona_id)
-                conn.commit()
-
-                # 检查是否达到大小限制
-                new_count = current_count + 1
+                # 检查是否达到大小限制 (在添加新消息之前)
                 max_size = self._get_max_size(msg.is_group)
-
-                if new_count >= max_size:
+                if current_count >= max_size:
                     logger.debug(
                         f"[GraphMemory Buffer] 会话 {session_id} 达到大小限制 ({max_size})。正在刷新。"
                     )
                     result = self._flush_session(conn, session_id)
                     if result:
                         text, is_group, persona = result
-                        await self.flush_callback(session_id, text, is_group, persona)
+                        # 在同步锁中，使用 create_task 避免阻塞
+                        asyncio.create_task(self.flush_callback(session_id, text, is_group, persona))
+                    # 重置计数器
+                    current_count = 0
+
+                # 添加新消息到数据库
+                self._add_message_to_db(conn, session_id, msg)
+                self._update_session_info(conn, session_id, msg.is_group, msg.persona_id)
+                conn.commit()
 
     async def _time_checker(self):
         """后台任务：每隔一段时间检查是否有因超时而需要刷新的缓冲区。"""
