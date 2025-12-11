@@ -1,53 +1,146 @@
 {
-  "enable_group_learning": {
-    "description": "是否开启群聊旁听学习。开启后，Bot 将会分析群聊中非直接对话并提取记忆。",
-    "type": "bool",
-    "default": true
-  },
-  "learning_model_id": {
-    "description": "用于记忆提取的专用 LLM 模型 ID。留空则使用当前会话的模型。建议使用便宜且指令遵循能力强的模型。",
-    "type": "string",
-    "default": "",
-    "_special": "select_provider"
-  },
-  "confidence_threshold": {
-    "description": "记忆采纳的置信度阈值 (0.0 - 1.0)。低于此置信度的关系将被丢弃。",
-    "type": "float",
-    "default": 0.6
-  },
-  "enable_persona_isolation": {
-    "description": "是否默认开启人格记忆隔离。开启后，不同人格的记忆相互独立。",
-    "type": "bool",
-    "default": true
-  },
-  "persona_isolation_exceptions": {
-    "description": "人格隔离例外列表。如果开启了默认隔离，此列表中的会话将共享记忆（不隔离）；如果关闭了默认隔离，此列表中的会话将开启隔离。填写 unified_msg_origin。",
-    "type": "list",
-    "items": {
-        "type": "string"
+    "enable_group_learning": {
+        "type": "bool",
+        "description": "启用群聊学习",
+        "hint": "若启用，机器人将从群聊中学习。否则，仅在私聊中学习。",
+        "default": true
     },
-    "default": []
-  },
-  "keyword_extraction_mode": {
-    "description": "记忆检索的关键词提取模式。local: 使用本地算法(jieba)提取，速度快且免费；llm: 使用 LLM 提取，更智能但有成本。",
-    "type": "string",
-    "options": ["local", "llm"],
-    "default": "local"
-  },
-  "keyword_extraction_provider": {
-    "description": "如果关键词提取模式为 llm，指定使用的模型 ID。留空则复用 learning_model_id 或当前会话模型。",
-    "type": "string",
-    "default": "",
-    "_special": "select_provider"
-  },
-  "max_global_nodes": {
-    "description": "全局最大节点数限制。当节点总数超过此值时，会触发清理机制，删除最旧且不重要的节点。",
-    "type": "int",
-    "default": 5000
-  },
-  "prune_interval": {
-    "description": "记忆清理检查间隔（秒）。",
-    "type": "int",
-    "default": 3600
-  }
+    "learning_model_id": {
+        "type": "string",
+        "description": "知识提取模型 ID",
+        "hint": "用于知识提取的 LLM Provider ID。如果留空，则使用当前会话的默认模型。",
+        "default": "",
+        "_special": "select_provider"
+    },
+    "embedding_provider_id": {
+        "type": "string",
+        "description": "Embedding 模型 ID",
+        "hint": "用于生成向量的 Embedding Provider ID。这是实现 GraphRAG 检索的核心，必须配置。",
+        "default": "",
+        "obvious_hint": true
+    },
+    "summarization_provider_id": {
+        "type": "string",
+        "description": "记忆摘要模型 ID",
+        "hint": "用于生成记忆摘要的 LLM Provider ID。如果留空，将使用 '知识提取模型' 的设置。",
+        "default": "",
+        "_special": "select_provider"
+    },
+    "enable_persona_isolation": {
+        "type": "bool",
+        "description": "启用人格记忆隔离",
+        "hint": "若启用，记忆将根据人格进行隔离。否则，所有记忆都存储在 'default' 人格下。",
+        "default": true
+    },
+    "persona_isolation_exceptions": {
+        "type": "list",
+        "description": "人格隔离例外名单",
+        "hint": "一个会话 ID (unified_msg_origin) 列表，其中的会话将反转人格隔离规则。",
+        "items": {
+            "type": "string"
+        },
+        "default": []
+    },
+    "max_global_nodes": {
+        "type": "int",
+        "description": "全局最大节点数",
+        "hint": "图谱中允许的最大节点数。当超过此限制时，最旧的 'Message' 节点将被修剪。",
+        "default": 10000
+    },
+    "prune_interval": {
+        "type": "int",
+        "description": "修剪检查间隔 (秒)",
+        "hint": "每隔多少秒检查一次图谱是否需要修剪。",
+        "default": 3600
+    },
+    "pruning_message_max_days": {
+        "type": "int",
+        "description": "原始消息最大保留天数",
+        "hint": "在清理阶段一，创建时间早于此天数的原始消息将被删除。",
+        "default": 90
+    },
+    "summarize_interval": {
+        "type": "int",
+        "description": "记忆摘要间隔 (秒)",
+        "hint": "每隔多少秒执行一轮记忆巩固（摘要）检查。",
+        "default": 1800
+    },
+    "consolidation_threshold": {
+        "type": "int",
+        "description": "记忆巩固阈值",
+        "hint": "当一个会话中未被摘要的消息数量超过此阈值时，触发记忆巩固。",
+        "default": 50
+    },
+    "enable_query_rewriting": {
+        "type": "bool",
+        "description": "启用查询重写",
+        "hint": "在进行记忆检索前，是否使用 LLM 将用户问题重写为一个独立的、包含上下文的问题。",
+        "default": true
+    },
+    "recall_vector_top_k": {
+        "type": "int",
+        "description": "向量召回数量 (Top K)",
+        "hint": "在向量搜索中，每个节点类型（实体、消息、摘要）召回的最相似结果数量。",
+        "default": 5
+    },
+    "recall_keyword_top_k": {
+        "type": "int",
+        "description": "关键词召回数量 (Top K)",
+        "hint": "在关键词搜索中，召回的实体数量。",
+        "default": 3
+    },
+    "recall_max_items": {
+        "type": "int",
+        "description": "最终注入上下文项目数",
+        "hint": "经过排序后，最终格式化并注入到 Prompt 中的项目总数。",
+        "default": 7
+    },
+    "webui_host": {
+        "type": "string",
+        "description": "WebUI 访问地址",
+        "hint": "WebUI 的监听地址。",
+        "default": "0.0.0.0"
+    },
+    "webui_port": {
+        "type": "int",
+        "description": "WebUI 访问端口",
+        "hint": "WebUI 的监听端口。",
+        "default": 8081
+    },
+    "webui_key": {
+        "type": "string",
+        "description": "WebUI 访问密钥",
+        "hint": "用于访问 WebUI 的密钥。如果留空，将在启动时生成一个随机密钥。",
+        "default": ""
+    },
+    "enable_reflection": {
+        "type": "bool",
+        "description": "启用 Agentic 反思",
+        "hint": "是否启用后台反思循环，用于事实修正和关系推断。需要消耗额外的 LLM token。",
+        "default": false
+    },
+    "reflection_interval": {
+        "type": "int",
+        "description": "反思间隔 (秒)",
+        "hint": "每隔多少秒执行一轮反思周期。",
+        "default": 7200
+    },
+    "buffer_max_messages_private": {
+        "type": "int",
+        "description": "私聊缓冲区最大消息数",
+        "hint": "私聊会话缓冲区中存储的最大消息条数，达到后触发刷新。",
+        "default": 10
+    },
+    "buffer_max_messages_group": {
+        "type": "int",
+        "description": "群聊缓冲区最大消息数",
+        "hint": "群聊会话缓冲区中存储的最大消息条数，达到后触发刷新。",
+        "default": 20
+    },
+    "buffer_max_wait_seconds": {
+        "type": "int",
+        "description": "缓冲区最大等待时间 (秒)",
+        "hint": "消息在缓冲区中最长等待时间，超过后自动刷新。",
+        "default": 180
+    }
 }

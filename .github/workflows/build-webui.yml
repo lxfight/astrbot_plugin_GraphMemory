@@ -1,0 +1,91 @@
+name: Build and Release WebUI
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号 (例如: v2.0.0)'
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+      
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: webui-src/package-lock.json
+      
+      - name: 安装依赖
+        run: |
+          cd webui-src
+          npm ci
+      
+      - name: 构建 WebUI
+        run: |
+          cd webui-src
+          npm run build
+      
+      - name: 打包构建产物
+        run: |
+          VERSION="${{ github.ref_name }}"
+          if [ -z "$VERSION" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          tar -czf webui-${VERSION}.tar.gz resources/
+          
+          # 生成 SHA256 校验和
+          sha256sum webui-${VERSION}.tar.gz > webui-${VERSION}.tar.gz.sha256
+      
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            webui-*.tar.gz
+            webui-*.tar.gz.sha256
+          body: |
+            ## 🎨 WebUI 更新
+            
+            ### 安装方式
+            
+            **方式 1: 自动更新脚本**
+            ```bash
+            python scripts/update_webui.py
+            ```
+            
+            **方式 2: 手动安装**
+            ```bash
+            # 下载 webui-${{ github.ref_name }}.tar.gz
+            tar -xzf webui-${{ github.ref_name }}.tar.gz
+            # 解压后重启 AstrBot
+            ```
+            
+            ### 校验文件完整性
+            ```bash
+            sha256sum -c webui-${{ github.ref_name }}.tar.gz.sha256
+            ```
+            
+            ---
+            
+            **构建时间**: ${{ github.event.head_commit.timestamp }}  
+            **提交**: ${{ github.sha }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: webui-build
+          path: |
+            resources/
+            webui-*.tar.gz
+          retention-days: 30

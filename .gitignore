@@ -88,3 +88,10 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Coverage reports
+coverage.xml
+coverage_report.txt
+
+# Local data
+data/

@@ -2,4 +2,4 @@ name: astrbot_plugin_GraphMemory
 author: lxfight
 version: 0.1.0
 description: 一个简单的图数据库记忆插件，基于kuzu实现。
-repo: https://github.com/lxfigth/astrbot_plugin_GraphMemory
+repo: https://github.com/lxfight/astrbot_plugin_GraphMemory

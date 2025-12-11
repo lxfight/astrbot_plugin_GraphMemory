@@ -1,293 +1,218 @@
+"""
+该模块定义了 `KnowledgeExtractor` 类，负责与大语言模型（LLM）交互，
+以从非结构化文本中提取结构化信息、重写查询和生成摘要。
+"""
+
 import json
 import time
-from dataclasses import dataclass
-from typing import Literal
+from dataclasses import dataclass, field
+from typing import Any
 
 from astrbot.api import logger
 from astrbot.api.star import Context
 
-from .prompts import GROUP_CHAT_PROMPT, PRIVATE_CHAT_PROMPT, SEARCH_KEYWORDS_PROMPT
-
-try:
-    import jieba
-    import jieba.analyse
-    import jieba.posseg as pseg
-
-    JIEBA_AVAILABLE = True
-except ImportError:
-    JIEBA_AVAILABLE = False
-    logger.warning(
-        "jieba not installed. Local keyword extraction will fallback to simple split."
-    )
+from .graph_entities import (
+    EntityNode,
+    MentionsRel,
+    MessageNode,
+    RelatedToRel,
+    SessionNode,
+    UserNode,
+)
+from .prompts import EXTRACTION_PROMPT, QUERY_REWRITING_PROMPT, SUMMARIZATION_PROMPT
 
 
 @dataclass
-class Triplet:
-    src: str
-    rel: str
-    tgt: str
-    src_type: str = "entity"
-    tgt_type: str = "entity"
-    weight: float = 1.0
-    confidence: float = 1.0
-    source_user: str = "unknown"  # Who provided this info
-
-    # 实体重要性 (0.0 - 1.0)，用于遗忘机制
-    src_importance: float = 0.5
-    tgt_importance: float = 0.5
+class ExtractedData:
+    """
+    一个数据类，用于封装从 LLM 提取并解析后的结构化图数据。
+    这为后续的图数据库操作提供了一个清晰、类型安全的数据结构。
+    """
+    users: list[UserNode] = field(default_factory=list)
+    sessions: list[SessionNode] = field(default_factory=list)
+    messages: list[MessageNode] = field(default_factory=list)
+    entities: list[EntityNode] = field(default_factory=list)
+    relations: list[RelatedToRel] = field(default_factory=list)
+    mentions: list[MentionsRel] = field(default_factory=list)
 
 
 class KnowledgeExtractor:
+    """
+    知识提取器，负责所有与 LLM 相关的文本处理任务。
+    它通过调用 LLM API，将非结构化的对话文本转换为结构化的图数据，
+    并执行查询重写和文本摘要等辅助任务。
+    """
     def __init__(
         self,
         context: Context,
-        provider_id: str | None = None,
-        keyword_mode: Literal["local", "llm"] = "local",
-        keyword_provider_id: str | None = None,
+        llm_provider_id: str | None,
+        embedding_provider: Any | None,
     ):
+        """
+        初始化 KnowledgeExtractor。
+
+        Args:
+            context (Context): AstrBot 的上下文对象。
+            llm_provider_id (str | None): 用于提取、重写和摘要的默认 LLM Provider ID。
+            embedding_provider (Any | None): Embedding Provider 实例，可以为 None。
+        """
         self.context = context
-        self.provider_id = provider_id
-        self.keyword_mode = keyword_mode
-        self.keyword_provider_id = keyword_provider_id
+        self.llm_provider_id = llm_provider_id
+        self.embedding_provider = embedding_provider
+
+    def set_embedding_provider(self, embedding_provider: Any):
+        """延迟设置 embedding provider。"""
+        self.embedding_provider = embedding_provider
 
     async def extract(
-        self, text_block: str, is_group: bool = False, provider_id: str | None = None
-    ) -> list[Triplet]:
+        self, text_block: str, session_id: str
+    ) -> ExtractedData | None:
         """
-        从文本块中提取三元组
+        从给定的文本块中提取结构化知识。
+
+        此方法调用 LLM，使用 `EXTRACTION_PROMPT` 指导模型从对话日志中识别
+        用户、消息、实体和它们之间的关系，并以 JSON 格式返回。
+
+        Args:
+            text_block (str): 从缓冲区刷新的对话文本块。
+            session_id (str): 当前的会话 ID。
+
+        Returns:
+            ExtractedData | None: 如果成功，返回包含提取数据的对象；否则返回 None。
         """
         if not text_block.strip():
-            return []
+            return None
 
         start_time = time.time()
-        logger.debug(
-            f"[GraphMemory DEBUG] Starting extraction. Group: {is_group}, Length: {len(text_block)}"
-        )
 
-        if is_group:
-            prompt = GROUP_CHAT_PROMPT.format(text=text_block)
-        else:
-            prompt = PRIVATE_CHAT_PROMPT.format(text=text_block)
+        # 确定要使用的 LLM Provider ID
+        provider_id = self.llm_provider_id
+        if not provider_id:
+            provider_id = await self.context.get_current_chat_provider_id(session_id)
 
-        logger.debug(f"[GraphMemory DEBUG] Prompt preview: {prompt[:100]}...")
+        if not provider_id:
+            logger.warning(
+                f"[GraphMemory] 在会话 {session_id} 中没有可用的 provider 进行提取。"
+            )
+            return None
 
-        triplets = await self._call_llm(prompt, provider_id)
+        prompt = EXTRACTION_PROMPT.format(text=text_block)
 
-        logger.debug(
-            f"[GraphMemory DEBUG] Extraction finished in {time.time() - start_time:.2f}s. Found {len(triplets)} triplets."
-        )
-        return triplets
-
-    async def _call_llm(
-        self, prompt: str, provider_id: str | None = None
-    ) -> list[Triplet]:
-        """
-        调用 LLM 并解析 JSON
-        """
         try:
-            effective_provider_id = provider_id or self.provider_id
-            if not effective_provider_id:
-                logger.warning(
-                    "[GraphMemory] No provider_id configured for extraction."
-                )
-                return []
-
-            start_req = time.time()
-            logger.debug(
-                f"[GraphMemory DEBUG] Calling LLM (Provider: {effective_provider_id})..."
-            )
-
+            # 调用 LLM 生成结构化数据
             resp = await self.context.llm_generate(
-                chat_provider_id=effective_provider_id, prompt=prompt
+                chat_provider_id=provider_id, prompt=prompt
             )
-            logger.debug(
-                f"[GraphMemory DEBUG] LLM request finished in {time.time() - start_req:.2f}s"
-            )
-
             if not resp or not resp.completion_text:
-                logger.warning("[GraphMemory DEBUG] LLM returned empty response.")
-                return []
+                logger.warning("[GraphMemory] LLM 为提取任务返回了空响应。")
+                return None
 
             raw_text = resp.completion_text
-            logger.debug(f"[GraphMemory DEBUG] LLM Raw Response:\n{raw_text}")
+            logger.debug(f"[GraphMemory DEBUG] LLM 原始提取响应:\n{raw_text}")
 
-            # 尝试解析 JSON
-            start = raw_text.find("[")
-            end = raw_text.rfind("]")
-
-            if start == -1 or end == -1:
-                logger.warning(
-                    f"[GraphMemory] Failed to find JSON array in response: {raw_text[:100]}..."
-                )
-                return []
-
-            json_str = raw_text[start : end + 1]
+            # 从 LLM 的响应中稳健地解析 JSON
+            json_str = self._find_json_blob(raw_text)
+            if not json_str:
+                logger.error(f"[GraphMemory] 未能在 LLM 响应中找到有效的 JSON。原始文本: {raw_text}")
+                return None
             data = json.loads(json_str)
 
-            triplets = []
-            for item in data:
-                src = item.get("src", "")
-                tgt = item.get("tgt", "")
+            # 将解析后的字典数据填充到 ExtractedData 对象中
+            extracted_data = ExtractedData(
+                users=[UserNode(**u) for u in data.get("users", [])],
+                sessions=[SessionNode(**s) for s in data.get("sessions", [])],
+                messages=[MessageNode(**m) for m in data.get("messages", [])],
+                entities=[EntityNode(**e) for e in data.get("entities", [])],
+                relations=[RelatedToRel(**r) for r in data.get("relations", [])],
+                mentions=[MentionsRel(**m) for m in data.get("mentions", [])],
+            )
 
-                # 计算重要性
-                src_imp = self._calculate_importance(src)
-                tgt_imp = self._calculate_importance(tgt)
-
-                rel = item.get("rel", "")
-                conf = item.get("confidence", 1.0)
-
-                logger.debug(
-                    f"[GraphMemory DEBUG] Parsed triplet: ({src}) --[{rel}]--> ({tgt}) (Confidence: {conf})"
-                )
-
-                triplets.append(
-                    Triplet(
-                        src=src,
-                        rel=rel,
-                        tgt=tgt,
-                        confidence=conf,
-                        source_user=item.get("source_user", "unknown"),
-                        src_importance=src_imp,
-                        tgt_importance=tgt_imp,
-                    )
-                )
-
-            return triplets
+            logger.info(f"[GraphMemory] 提取完成，耗时 {time.time() - start_time:.2f}s。")
+            return extracted_data
 
         except json.JSONDecodeError:
-            logger.error(f"[GraphMemory] JSON Parse Error. Raw text: {raw_text}")
-            return []
+            logger.error(f"[GraphMemory] 提取过程中发生 JSON 解析错误。原始文本: {raw_text}")
+            return None
         except Exception as e:
-            # 捕获所有异常（包括 ProviderNotFoundError），避免 Crash
-            logger.error(f"[GraphMemory] LLM extraction error: {e}")
-            logger.debug(f"[GraphMemory DEBUG] Detailed traceback:{e}", exc_info=True)
-            return []
+            logger.error(f"[GraphMemory] LLM 提取错误: {e}", exc_info=True)
+            return None
 
-    def _calculate_importance(self, text: str) -> float:
+    def _find_json_blob(self, text: str) -> str | None:
         """
-        [Local NLP] 计算实体重要性 (0.0 - 1.0)
-        基于 jieba.posseg 词性标注。
+        从可能包含 Markdown 代码块或其他无关文本的字符串中稳健地找到 JSON 对象。
+        例如，LLM 可能返回 ` ```json\n{...}\n``` `。
         """
-        if not text or not JIEBA_AVAILABLE:
-            return 0.5  # Default
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1:
+            return text[start : end + 1]
+        return None
 
-        try:
-            # 取第一个词的词性作为整体词性
-            # 或者取 text 中所有词的最高权重
-            words = list(pseg.cut(text))
-            max_score = 0.5
-
-            # 词性权重映射
-            # nr: 人名 (0.9)
-            # ns: 地名 (0.8)
-            # nz: 其他专名 (0.8)
-            # nt: 机构团体 (0.8)
-            # n: 名词 (0.6)
-            # v: 动词 (0.3)
-            # a: 形容词 (0.3)
-            # r: 代词 (0.1)
-            pos_weights = {
-                "nr": 0.9,
-                "nrfg": 0.9,
-                "nrt": 0.9,
-                "ns": 0.8,
-                "nsf": 0.8,
-                "nt": 0.8,
-                "nz": 0.8,
-                "n": 0.6,
-                "v": 0.3,
-                "vd": 0.3,
-                "vn": 0.4,
-                "a": 0.3,
-                "ad": 0.3,
-                "an": 0.4,
-                "r": 0.2,
-            }
-
-            for w, flag in words:
-                score = pos_weights.get(flag, 0.5)  # 默认 0.5
-                if score > max_score:
-                    max_score = score
-
-            return max_score
-
-        except Exception as e:
-            logger.warning(f"[GraphMemory] Failed to calc importance for '{text}': {e}")
-            return 0.5
-
-    async def extract_keywords(
-        self, query: str, provider_id: str | None = None
-    ) -> list[str]:
+    async def rewrite_query(self, query: str, history: str, provider_id: str | None = None) -> str:
         """
-        提取搜索关键词
+        结合对话历史，将用户的当前查询重写为一个独立的、无歧义的查询。
+        这对于提高后续向量检索的准确性至关重要。
+
+        Args:
+            query (str):用户的原始查询。
+            history (str): 最近的对话历史。
+            provider_id (str | None): 用于此任务的 LLM Provider ID。如果为 None，则使用默认值。
+
+        Returns:
+            str: 重写后的查询。如果失败，则返回原始查询。
         """
-        start_time = time.time()
+        if not history:
+            return query
 
-        if self.keyword_mode == "local":
-            keywords = self._extract_keywords_local(query)
-            logger.debug(
-                f"[GraphMemory DEBUG] Local keyword extraction: {keywords} (Time: {time.time() - start_time:.4f}s)"
-            )
-            return keywords
-        else:
-            keywords = await self._extract_keywords_llm(query, provider_id)
-            logger.debug(
-                f"[GraphMemory DEBUG] LLM keyword extraction: {keywords} (Time: {time.time() - start_time:.2f}s)"
-            )
-            return keywords
+        prompt = QUERY_REWRITING_PROMPT.format(history=history, query=query)
 
-    def _extract_keywords_local(self, query: str) -> list[str]:
-        """
-        使用 jieba 或简单分割提取关键词
-        """
-        if not query.strip():
-            return []
-
-        if JIEBA_AVAILABLE:
-            # 使用 TF-IDF 提取关键词，取前 5 个
-            keywords = jieba.analyse.extract_tags(query, topK=5)
-            # 如果提取结果为空（例如全是停用词或标点），尝试使用 textrank
-            if not keywords:
-                keywords = jieba.analyse.textrank(query, topK=5)
-
-            # 如果依然为空，回退到分词
-            if not keywords:
-                seg_list = jieba.cut(query)
-                # 过滤掉长度小于2的词（通常是单字或无意义词），保留英文和数字
-                keywords = [w for w in seg_list if len(w) > 1 or w.isalnum()]
-
-            return keywords[:5]
-        else:
-            # 回退策略：简单按空格分割，取前5个长于2的词
-            return [w for w in query.split() if len(w) > 1][:5]
-
-    async def _extract_keywords_llm(
-        self, query: str, provider_id: str | None = None
-    ) -> list[str]:
-        """
-        使用 LLM 提取关键词
-        """
-        effective_provider_id = (
-            self.keyword_provider_id or provider_id or self.provider_id
-        )
+        effective_provider_id = provider_id or self.llm_provider_id
         if not effective_provider_id:
-            logger.warning(
-                "[GraphMemory] No provider available for LLM keyword extraction. Fallback to local."
-            )
-            return self._extract_keywords_local(query)
-
-        prompt = SEARCH_KEYWORDS_PROMPT.format(query=query)
+            logger.warning("[GraphMemory] 没有可用的 provider 进行查询重写。返回原始查询。")
+            return query
 
         try:
             resp = await self.context.llm_generate(
                 chat_provider_id=effective_provider_id, prompt=prompt
             )
             if resp and resp.completion_text:
-                text = resp.completion_text.strip()
-                text = text.replace("```", "").strip()
-                keywords = [k.strip() for k in text.split(",") if k.strip()]
-                return keywords
+                rewritten = resp.completion_text.strip()
+                logger.debug(f"[GraphMemory] 重写查询: {rewritten}")
+                return rewritten
         except Exception as e:
-            logger.error(f"[GraphMemory] LLM Keyword extraction error: {e}")
+            logger.error(f"[GraphMemory] 查询重写错误: {e}")
 
-        return []
+        return query
+
+
+    async def summarize(self, text_block: str, provider_id: str | None = None) -> str | None:
+        """
+        将一个长文本块（通常是多轮对话）总结为一段简短的记忆摘要。
+        这用于记忆巩固过程。
+
+        Args:
+            text_block (str): 要总结的文本。
+            provider_id (str | None): 用于此任务的 LLM Provider ID。如果为 None，则使用默认值。
+
+        Returns:
+            str | None: 生成的摘要文本，如果失败则为 None。
+        """
+        prompt = SUMMARIZATION_PROMPT.format(text=text_block)
+
+        effective_provider_id = provider_id or self.llm_provider_id
+        if not effective_provider_id:
+            logger.warning("[GraphMemory] 没有可用的 provider 进行摘要。跳过。")
+            return None
+
+        try:
+            resp = await self.context.llm_generate(
+                chat_provider_id=effective_provider_id, prompt=prompt
+            )
+            if resp and resp.completion_text:
+                summary = resp.completion_text.strip()
+                logger.debug(f"[GraphMemory] 生成的摘要: {summary[:100]}...")
+                return summary
+        except Exception as e:
+            logger.error(f"[GraphMemory] 摘要生成错误: {e}")
+
+        return None
