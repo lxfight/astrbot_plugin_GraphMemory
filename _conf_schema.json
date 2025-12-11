@@ -17,7 +17,6 @@
         "description": "Embedding 模型 ID",
         "hint": "用于生成向量的 Embedding Provider ID。这是实现 GraphRAG 检索的核心，必须配置。",
         "default": "",
-        "_special": "select_provider",
         "obvious_hint": true
     },
     "summarization_provider_id": {

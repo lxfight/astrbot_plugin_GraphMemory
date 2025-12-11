@@ -13,7 +13,6 @@ from astrbot.api.star import Context, Star, StarTools, register
 from .core.command_handler import CommandHandler
 from .core.monitoring_service import monitoring_service
 from .core.plugin_service import PluginService
-from .core.web_server import WebServer
 
 
 class MonitoringLogHandler(logging.Handler):
@@ -63,12 +62,8 @@ class GraphMemory(Star):
         self.service = PluginService(context, self.config, plugin_data_path)
         self.handler = CommandHandler(self.service)
 
-        # 启动 Web 可视化服务器
-        self.web_server = WebServer(self.service.graph_engine, self.config)
-        try:
-            self.web_server.start()
-        except Exception as e:
-            logger.error(f"[GraphMemory] 启动 WebUI 失败: {e}")
+        # Web 服务器将在 PluginService.start() 中启动
+        self.web_server = None
 
         # 设置监控日志处理器
         self.log_handler = MonitoringLogHandler()
@@ -132,5 +127,3 @@ class GraphMemory(Star):
         logger.removeHandler(self.log_handler)
 
         await self.service.shutdown()
-        if self.web_server:
-            self.web_server.stop()

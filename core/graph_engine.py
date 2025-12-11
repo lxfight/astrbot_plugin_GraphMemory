@@ -102,7 +102,9 @@ class GraphEngine:
             self.kuzu_db = kuzu.Database(self.db_path)
             self.conn: Any = kuzu.Connection(self.kuzu_db)
         except Exception as e:
-            logger.error(f"初始化 KuzuDB 失败 at path {self.db_path}: {e}", exc_info=True)
+            logger.error(
+                f"初始化 KuzuDB 失败 at path {self.db_path}: {e}", exc_info=True
+            )
             raise
         self.embedding_provider = embedding_provider
 
@@ -144,21 +146,29 @@ class GraphEngine:
 
     def close(self):
         """关闭数据库连接并释放资源。"""
+        logger.info("[GraphMemory] 正在关闭 GraphEngine...")
         try:
             if self._executor:
                 self._executor.shutdown(wait=True)
-            # kuzu.Database 对象没有 close 方法，它在垃圾回收时自动处理。
-            # 将其设置为 None 有助于垃圾回收。
+                self._executor = None
+
+            self.conn = None
             self.kuzu_db = None
-            logger.info("[GraphMemory] KuzuDB 资源已释放。")
+            logger.info("[GraphMemory] KuzuDB 资源已成功释放。")
         except Exception as e:
-            logger.error(f"[GraphMemory] 关闭 KuzuDB 连接失败: {e}")
+            logger.error(
+                f"[GraphMemory] 关闭 KuzuDB 连接时发生异常: {e}", exc_info=True
+            )
 
     async def _run_in_executor(self, func, *args, **kwargs):
         """
         一个异步帮助函数，用于在专用的线程池中运行同步的、阻塞的数据库操作，
         从而避免阻塞主 asyncio 事件循环。
         """
+        if not self._executor:
+            raise RuntimeError(
+                "GraphEngine has been closed and cannot execute new tasks."
+            )
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._executor, functools.partial(func, *args, **kwargs)
@@ -338,8 +348,7 @@ class GraphEngine:
         if JIEBA_AVAILABLE:
             keywords = jieba.analyse.extract_tags(query, topK=3, withWeight=False)
             return [str(k) for k in keywords]
-        else:
-            return [w for w in query.split() if len(w) > 2][:3]
+        return [w for w in query.split() if len(w) > 2][:3]
 
     def _keyword_search(
         self, keywords: list[str], session_id: str, limit: int = 3
@@ -363,7 +372,7 @@ class GraphEngine:
         """
         从一组种子节点出发，在图上遍历指定跳数，返回邻近的节点和关系。
         """
-        context = {"nodes": [], "edges": []}
+        context: dict[str, list] = {"nodes": [], "edges": []}
         if not seed_ids:
             return context
 
@@ -948,14 +957,22 @@ class GraphEngine:
 
         try:
             # 执行三个独立的节点查询
-            for query in [GET_SESSION_GRAPH_NODES_PART1, GET_SESSION_GRAPH_NODES_PART2, GET_SESSION_GRAPH_NODES_PART3]:
+            for query in [
+                GET_SESSION_GRAPH_NODES_PART1,
+                GET_SESSION_GRAPH_NODES_PART2,
+                GET_SESSION_GRAPH_NODES_PART3,
+            ]:
                 res_nodes = self.execute_query(query, params)
                 while res_nodes.has_next():
                     node = res_nodes.get_next()[0]
                     add_node(node)
 
             # 执行三个独立的边查询
-            for query in [GET_SESSION_GRAPH_EDGES_PART1, GET_SESSION_GRAPH_EDGES_PART2, GET_SESSION_GRAPH_EDGES_PART3]:
+            for query in [
+                GET_SESSION_GRAPH_EDGES_PART1,
+                GET_SESSION_GRAPH_EDGES_PART2,
+                GET_SESSION_GRAPH_EDGES_PART3,
+            ]:
                 res_edges = self.execute_query(query, params)
                 while res_edges.has_next():
                     a, r, b = res_edges.get_next()
@@ -1282,7 +1299,9 @@ class GraphEngine:
             if not res.has_next():
                 return []
 
-            all_candidates = [dict(zip(["id", "type", "order_key"], row)) for row in res.get_all()]
+            all_candidates = [
+                dict(zip(["id", "type", "order_key"], row)) for row in res.get_all()
+            ]
 
             # 2. 在 Python 中进行排序和去重
             # 按 order_key (degree 或 timestamp) 降序排序

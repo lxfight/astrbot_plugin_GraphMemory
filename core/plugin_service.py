@@ -1,6 +1,7 @@
 """
 该模块定义了 `PluginService` 类，它封装了 GraphMemory 插件的核心业务逻辑。
 """
+
 import asyncio
 import json
 from pathlib import Path
@@ -16,6 +17,7 @@ from .extractor import KnowledgeExtractor
 from .graph_engine import JIEBA_AVAILABLE, GraphEngine
 from .monitoring_service import monitoring_service
 from .reflection_engine import ReflectionEngine
+from .web_server import WebServer
 
 
 class PluginService:
@@ -28,6 +30,7 @@ class PluginService:
     def __init__(self, context: Context, config: dict, plugin_data_path: Path):
         self.context = context
         self.config = config or {}
+        self.plugin_data_path = plugin_data_path
         self._maintenance_task = None
 
         # --- 配置加载 ---
@@ -35,8 +38,12 @@ class PluginService:
         self.learning_model_id = self.config.get("learning_model_id")
         self.embedding_provider_id = self.config.get("embedding_provider_id")
         self.summarization_provider_id = self.config.get("summarization_provider_id")
-        self.enable_persona_isolation = self.config.get("enable_persona_isolation", True)
-        self.persona_isolation_exceptions = set(self.config.get("persona_isolation_exceptions", []))
+        self.enable_persona_isolation = self.config.get(
+            "enable_persona_isolation", True
+        )
+        self.persona_isolation_exceptions = set(
+            self.config.get("persona_isolation_exceptions", [])
+        )
         self.max_global_nodes = self.config.get("max_global_nodes", 10000)
         self.prune_interval = self.config.get("prune_interval", 3600)
         self.pruning_message_max_days = self.config.get("pruning_message_max_days", 90)
@@ -50,14 +57,12 @@ class PluginService:
 
         logger.debug(f"[GraphMemory] 插件数据路径: {plugin_data_path}")
 
-        # --- 核心组件初始化 ---
+        # --- 核心组件初始化 (延迟到 start 方法) ---
         self.embedding_provider: Any = None
-        self.graph_engine = GraphEngine(plugin_data_path, None)
-        self.extractor = KnowledgeExtractor(
-            context=context,
-            llm_provider_id=self.learning_model_id,
-            embedding_provider=self.embedding_provider,
-        )
+        self.graph_engine: GraphEngine | None = None
+        self.extractor: KnowledgeExtractor | None = None
+        self.web_server: WebServer | None = None
+
         self.buffer_manager = BufferManager(
             flush_callback=self._handle_buffer_flush,
             max_size=20 if self.enable_group_learning else 10,
@@ -66,30 +71,60 @@ class PluginService:
         self.reflection_engine = ReflectionEngine(self)
 
         if not JIEBA_AVAILABLE:
-            logger.warning("[GraphMemory] 未找到 'jieba' 库，关键词搜索功能将受限。为了在非英语语言上获得更好的性能，请运行 'pip install jieba'。")
+            logger.warning(
+                "[GraphMemory] 未找到 'jieba' 库，关键词搜索功能将受限。为了在非英语语言上获得更好的性能，请运行 'pip install jieba'。"
+            )
 
     async def start(self):
         """启动服务和后台任务。"""
-        # 在 start 方法中延迟获取 embedding provider
+        # 1. 获取 embedding provider
         if self.embedding_provider_id:
             try:
-                self.embedding_provider = self.context.provider_manager.get_provider_by_id(self.embedding_provider_id)
-                if self.embedding_provider:
-                    logger.info(f"[GraphMemory] 成功获取 embedding provider: '{self.embedding_provider_id}'")
-                    # 将获取到的 provider 设置到 graph_engine 和 extractor 中
-                    self.graph_engine.set_embedding_provider(self.embedding_provider)
-                    self.extractor.set_embedding_provider(self.embedding_provider)
+                provider = self.context.get_provider_by_id(self.embedding_provider_id)
+                if provider:
+                    self.embedding_provider = provider
+                    logger.info(
+                        f"[GraphMemory] 成功获取 embedding provider: '{self.embedding_provider_id}'"
+                    )
                 else:
-                    logger.error(f"[GraphMemory] 未找到 ID 为 '{self.embedding_provider_id}' 的 embedding provider。")
+                    logger.error(
+                        f"[GraphMemory] 未找到 ID 为 '{self.embedding_provider_id}' 的 embedding provider。"
+                    )
             except Exception as e:
-                logger.error(f"[GraphMemory] 延迟获取 embedding provider '{self.embedding_provider_id}' 失败: {e}")
+                logger.error(
+                    f"[GraphMemory] 获取 embedding provider '{self.embedding_provider_id}' 失败: {e}",
+                    exc_info=True,
+                )
         else:
-            logger.warning("[GraphMemory] 未配置 embedding_provider_id，向量相关功能将不可用。")
+            logger.warning(
+                "[GraphMemory] 未配置 embedding_provider_id，向量相关功能将不可用。"
+            )
 
+        # 2. 初始化 GraphEngine
+        self.graph_engine = GraphEngine(self.plugin_data_path, self.embedding_provider)
+
+        # 3. 初始化 Extractor
+        self.extractor = KnowledgeExtractor(
+            context=self.context,
+            llm_provider_id=self.learning_model_id,
+            embedding_provider=self.embedding_provider,
+        )
+
+        # 4. 初始化并启动 WebServer
+        self.web_server = WebServer(self.graph_engine, self.config)
+        try:
+            self.web_server.start()
+            logger.info("[GraphMemory] WebUI 已启动。")
+        except Exception as e:
+            logger.error(f"[GraphMemory] 启动 WebUI 失败: {e}")
+
+        # 5. 启动后台任务
         self._maintenance_task = asyncio.create_task(self._maintenance_loop())
         if self.enable_reflection:
             await self.reflection_engine.start(self.reflection_interval)
-        logger.info(f"[GraphMemory] PluginService 已启动。群聊学习状态: {self.enable_group_learning}")
+        logger.info(
+            f"[GraphMemory] PluginService 已启动。群聊学习状态: {self.enable_group_learning}"
+        )
 
     async def shutdown(self):
         """停止服务和后台任务。"""
@@ -101,23 +136,36 @@ class PluginService:
                 pass
         await self.buffer_manager.shutdown()
         await self.reflection_engine.stop()
-        self.graph_engine.close()
+        if self.web_server:
+            self.web_server.stop()
+        if self.graph_engine:
+            self.graph_engine.close()
 
     async def inject_memory(self, event: AstrMessageEvent, req: ProviderRequest):
         """在 LLM 请求前注入相关记忆。"""
-        asyncio.create_task(monitoring_service.add_task(f"正在为会话 {event.unified_msg_origin} 注入记忆..."))
-        session_id = event.unified_msg_origin
-        if not self.embedding_provider:
-            logger.debug("[GraphMemory] 未配置 embedding provider，跳过记忆注入。")
+        if not self.graph_engine or not self.extractor or not self.embedding_provider:
+            logger.debug("[GraphMemory] 核心组件未初始化，跳过记忆注入。")
             return
+
+        asyncio.create_task(
+            monitoring_service.add_task(
+                f"正在为会话 {event.unified_msg_origin} 注入记忆..."
+            )
+        )
+        session_id = event.unified_msg_origin
+
         try:
             query_to_embed = event.message_str
             if self.enable_query_rewriting:
                 history = await self._get_recent_history(session_id, limit=5)
-                rewritten_query = await self.extractor.rewrite_query(event.message_str, history)
+                rewritten_query = await self.extractor.rewrite_query(
+                    event.message_str, history
+                )
                 if rewritten_query:
                     query_to_embed = rewritten_query
-                    logger.debug(f"[GraphMemory] 重写查询: '{event.message_str}' -> '{rewritten_query}'")
+                    logger.debug(
+                        f"[GraphMemory] 重写查询: '{event.message_str}' -> '{rewritten_query}'"
+                    )
 
             if not query_to_embed:
                 return
@@ -133,8 +181,12 @@ class PluginService:
             )
 
             if memory_text:
-                logger.debug(f"[GraphMemory] 发现相关上下文 (长度: {len(memory_text)}). 正在注入...")
-                injection = f"\n\n[图记忆上下文]\n{memory_text}\n(如果相关，请参考这些关系。)"
+                logger.debug(
+                    f"[GraphMemory] 发现相关上下文 (长度: {len(memory_text)}). 正在注入..."
+                )
+                injection = (
+                    f"\n\n[图记忆上下文]\n{memory_text}\n(如果相关，请参考这些关系。)"
+                )
                 req.system_prompt = (req.system_prompt or "") + injection
             else:
                 logger.debug("[GraphMemory] 图搜索未发现相关上下文。")
@@ -145,10 +197,11 @@ class PluginService:
         """处理用户消息，将其添加到缓冲区。"""
         persona_id = await self._get_persona_id(event)
         # 将消息发送到监控服务
-        asyncio.create_task(monitoring_service.add_message(
-            sender=event.get_sender_name(),
-            text=event.get_message_outline()
-        ))
+        asyncio.create_task(
+            monitoring_service.add_message(
+                sender=event.get_sender_name(), text=event.get_message_outline()
+            )
+        )
         await self.buffer_manager.add_user_message(event, persona_id)
 
     async def process_bot_message(self, event: AstrMessageEvent, resp: LLMResponse):
@@ -156,35 +209,61 @@ class PluginService:
         persona_id = await self._get_persona_id(event)
         if resp.completion_text:
             # 将消息发送到监控服务
-            asyncio.create_task(monitoring_service.add_message(
-                sender="Bot",
-                text=resp.completion_text
-            ))
-            await self.buffer_manager.add_bot_message(event, persona_id, content=resp.completion_text)
+            asyncio.create_task(
+                monitoring_service.add_message(sender="Bot", text=resp.completion_text)
+            )
+            await self.buffer_manager.add_bot_message(
+                event, persona_id, content=resp.completion_text
+            )
 
-    async def _handle_buffer_flush(self, session_id: str, text: str, is_group: bool, persona_id: str):
+    async def _handle_buffer_flush(
+        self, session_id: str, text: str, is_group: bool, persona_id: str
+    ):
         """处理缓冲区刷新事件，提取知识并存入图数据库。"""
         if is_group and not self.enable_group_learning:
+            return
+
+        if not self.graph_engine or not self.extractor:
+            logger.warning("[GraphMemory] 核心组件未初始化，无法处理缓冲区刷新。")
             return
 
         task_description = f"正在刷新会话 {session_id} (人格: {persona_id}) 的缓冲区, 文本长度: {len(text)}"
         logger.info(f"[GraphMemory] {task_description}")
         asyncio.create_task(monitoring_service.add_task(task_description))
-        extracted_data = await self.extractor.extract(text_block=text, session_id=session_id)
+        extracted_data = await self.extractor.extract(
+            text_block=text, session_id=session_id
+        )
         if not extracted_data:
             logger.debug("[GraphMemory] 未从缓冲区提取到结构化数据。")
             return
 
         tasks = [self.graph_engine.add_user(user) for user in extracted_data.users]
-        tasks.extend([self.graph_engine.add_session(session) for session in extracted_data.sessions])
-        tasks.extend([self.graph_engine.add_entity(entity) for entity in extracted_data.entities])
+        tasks.extend(
+            [
+                self.graph_engine.add_session(session)
+                for session in extracted_data.sessions
+            ]
+        )
+        tasks.extend(
+            [self.graph_engine.add_entity(entity) for entity in extracted_data.entities]
+        )
         await asyncio.gather(*tasks)
 
-        tasks = [self.graph_engine.add_message(message) for message in extracted_data.messages]
+        tasks = [
+            self.graph_engine.add_message(message)
+            for message in extracted_data.messages
+        ]
         await asyncio.gather(*tasks)
 
-        tasks = [self.graph_engine.add_relation(rel) for rel in extracted_data.relations]
-        tasks.extend([self.graph_engine.add_mention(mention) for mention in extracted_data.mentions])
+        tasks = [
+            self.graph_engine.add_relation(rel) for rel in extracted_data.relations
+        ]
+        tasks.extend(
+            [
+                self.graph_engine.add_mention(mention)
+                for mention in extracted_data.mentions
+            ]
+        )
         await asyncio.gather(*tasks)
 
         logger.info(f"[GraphMemory] 已为会话 {session_id} 注入结构化数据。")
@@ -199,6 +278,9 @@ class PluginService:
             try:
                 await asyncio.sleep(check_interval)
 
+                if not self.graph_engine:
+                    continue
+
                 summarize_interval = self.config.get("summarize_interval", 1800)
                 if summarize_counter >= summarize_interval:
                     summarize_counter = 0
@@ -209,7 +291,7 @@ class PluginService:
                     prune_counter = 0
                     await self.graph_engine.prune_graph(
                         max_nodes=self.max_global_nodes,
-                        message_max_days=self.pruning_message_max_days
+                        message_max_days=self.pruning_message_max_days,
                     )
             except asyncio.CancelledError:
                 break
@@ -218,17 +300,28 @@ class PluginService:
 
     async def _run_consolidation_cycle(self):
         """执行一轮记忆巩固。"""
+        if not self.graph_engine or not self.extractor:
+            return
+
         logger.debug("[GraphMemory] 正在运行记忆巩固周期...")
         try:
-            sessions_to_process = await self.graph_engine.find_sessions_for_consolidation(self.consolidation_threshold)
+            sessions_to_process = (
+                await self.graph_engine.find_sessions_for_consolidation(
+                    self.consolidation_threshold
+                )
+            )
             if not sessions_to_process:
                 logger.debug("[GraphMemory] 没有需要巩固的会话。")
                 return
 
-            logger.info(f"[GraphMemory] 发现 {len(sessions_to_process)} 个会话需要进行记忆巩固。")
+            logger.info(
+                f"[GraphMemory] 发现 {len(sessions_to_process)} 个会话需要进行记忆巩固。"
+            )
             for session_id in sessions_to_process:
                 try:
-                    consolidation_result = self.graph_engine.get_messages_for_consolidation(session_id)
+                    consolidation_result = (
+                        self.graph_engine.get_messages_for_consolidation(session_id)
+                    )
                     if not consolidation_result:
                         continue
 
@@ -236,11 +329,17 @@ class PluginService:
                     if not text_block:
                         continue
 
-                    summary = await self.extractor.summarize(text_block, provider_id=self.summarization_provider_id)
+                    summary = await self.extractor.summarize(
+                        text_block, provider_id=self.summarization_provider_id
+                    )
                     if summary:
-                        await self.graph_engine.consolidate_memory(session_id, summary, message_ids, user_ids)
+                        await self.graph_engine.consolidate_memory(
+                            session_id, summary, message_ids, user_ids
+                        )
                 except Exception as e:
-                    logger.error(f"为会话 {session_id} 进行巩固时出错: {e}", exc_info=True)
+                    logger.error(
+                        f"为会话 {session_id} 进行巩固时出错: {e}", exc_info=True
+                    )
         except Exception as e:
             logger.error(f"查找需要巩固的会话失败: {e}", exc_info=True)
 
@@ -258,7 +357,9 @@ class PluginService:
         try:
             cid = await self.context.conversation_manager.get_curr_conversation_id(umo)
             if cid:
-                conv = await self.context.conversation_manager.get_conversation(umo, cid)
+                conv = await self.context.conversation_manager.get_conversation(
+                    umo, cid
+                )
                 if conv and conv.persona_id:
                     return conv.persona_id
         except Exception:
@@ -316,5 +417,8 @@ class PluginService:
 
             return "\n".join(formatted_lines)
         except Exception as e:
-            logger.error(f"[GraphMemory] 获取会话 {session_id} 的最近历史失败: {e}", exc_info=True)
+            logger.error(
+                f"[GraphMemory] 获取会话 {session_id} 的最近历史失败: {e}",
+                exc_info=True,
+            )
             return ""

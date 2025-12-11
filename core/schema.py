@@ -10,11 +10,38 @@ from astrbot.api import logger
 
 def get_embedding_dim_from_provider(embedding_provider: Any) -> int:
     """从 embedding provider 获取维度，如果失败则返回默认值。"""
-    if hasattr(embedding_provider, "dims") and embedding_provider.dims:
-        return embedding_provider.dims
+    logger.debug("[GraphMemory Schema] 正在尝试获取 Embedding 维度...")
+    if not embedding_provider:
+        logger.debug("[GraphMemory Schema] embedding_provider 为 None。")
+    elif not hasattr(embedding_provider, "get_dim"):
+        logger.debug(
+            f"[GraphMemory Schema] embedding_provider ({type(embedding_provider)}) 没有 get_dim 属性。"
+        )
+    elif not callable(embedding_provider.get_dim):
+        logger.debug("[GraphMemory Schema] embedding_provider.get_dim 不是可调用方法。")
+    else:
+        try:
+            dim = embedding_provider.get_dim()
+            logger.debug(
+                f"[GraphMemory Schema] provider.get_dim() 返回: {dim} (类型: {type(dim)})"
+            )
+            if isinstance(dim, int) and dim > 0:
+                logger.info(
+                    f"[GraphMemory Schema] 从 Provider 获取到 Embedding 维度: {dim}"
+                )
+                return dim
+            else:
+                logger.debug("[GraphMemory Schema] get_dim() 返回了无效的维度值。")
+        except Exception as e:
+            logger.error(
+                f"[GraphMemory Schema] 调用 provider.get_dim() 时出错: {e}",
+                exc_info=True,
+            )
 
-    default_dim = 384
-    logger.warning(f"[GraphMemory Schema] 未能从 Provider 获取 Embedding 维度，将默认使用 {default_dim}。")
+    default_dim = 1024
+    logger.warning(
+        f"[GraphMemory Schema] 未能从 Provider 获取 Embedding 维度，将默认使用 {default_dim}。"
+    )
     return default_dim
 
 
@@ -33,7 +60,7 @@ def initialize_schema(conn, embedding_dim: int):
 
     # 如果没有从 embedding provider 获取到维度，使用一个合理的默认值
     if embedding_dim <= 0:
-        embedding_dim = 384
+        embedding_dim = 1024
         logger.warning(
             f"[GraphMemory Schema] 未检测到 Embedding 维度，将默认使用 {embedding_dim}。"
         )

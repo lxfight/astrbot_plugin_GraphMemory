@@ -358,7 +358,8 @@ class WebServer:
         self.stop_event.clear()
         self.server_thread = threading.Thread(target=self._run_fastapi_server, daemon=True)
         self.server_thread.start()
-        logger.info(f"[GraphMemory] WebUI 已启动，访问地址: http://{self.host}:{self.port}")
+        display_host = "127.0.0.1" if self.host == "0.0.0.0" else self.host
+        logger.info(f"[GraphMemory] WebUI 已启动，访问地址: http://{display_host}:{self.port}")
 
     def stop(self):
         """停止 FastAPI 服务器。"""
