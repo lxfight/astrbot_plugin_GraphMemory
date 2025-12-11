@@ -387,7 +387,7 @@ class GraphEngine:
                 edge_info = {
                     "from": n.get("id") or n.get("name"),
                     "to": m.get("id") or m.get("name"),
-                    "label": r.get("relation") or r["_label"],
+                    "label": r.get("relation") or r.get("_label", "UNKNOWN"),
                     "properties": {k: v for k, v in r.items() if not k.startswith("_")},
                 }
                 context["edges"].append(edge_info)
@@ -1348,8 +1348,8 @@ class GraphEngine:
                     package_lines.append(f"  - 属性: {n}")
                     main_node_added = True
 
-                relation_label = r.get("relation") or r["_label"]
-                neighbor_label = m["_label"]
+                relation_label = r.get("relation") or r.get("_label", "UNKNOWN")
+                neighbor_label = m.get("_label", "Unknown")
                 neighbor_id = m.get("id") or m.get("name")
 
                 package_lines.append(

@@ -27,6 +27,21 @@ class PluginService:
 
     DEFAULT_PERSONA_ID = "default"
 
+    def _handle_task_exception(self, task: asyncio.Task):
+        """处理异步任务中的异常"""
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"[GraphMemory] 后台任务异常: {e}", exc_info=True)
+
+    def _create_monitored_task(self, coro) -> asyncio.Task:
+        """创建一个带错误日志的异步任务"""
+        task = asyncio.create_task(coro)
+        task.add_done_callback(self._handle_task_exception)
+        return task
+
     def __init__(self, context: Context, config: dict, plugin_data_path: Path):
         self.context = context
         self.config = config or {}
@@ -119,6 +134,7 @@ class PluginService:
             logger.error(f"[GraphMemory] 启动 WebUI 失败: {e}")
 
         # 5. 启动后台任务
+        await self.buffer_manager.startup()
         self._maintenance_task = asyncio.create_task(self._maintenance_loop())
         if self.enable_reflection:
             await self.reflection_engine.start(self.reflection_interval)
@@ -147,7 +163,7 @@ class PluginService:
             logger.debug("[GraphMemory] 核心组件未初始化，跳过记忆注入。")
             return
 
-        asyncio.create_task(
+        self._create_monitored_task(
             monitoring_service.add_task(
                 f"正在为会话 {event.unified_msg_origin} 注入记忆..."
             )
@@ -197,7 +213,7 @@ class PluginService:
         """处理用户消息，将其添加到缓冲区。"""
         persona_id = await self._get_persona_id(event)
         # 将消息发送到监控服务
-        asyncio.create_task(
+        self._create_monitored_task(
             monitoring_service.add_message(
                 sender=event.get_sender_name(), text=event.get_message_outline()
             )
@@ -209,7 +225,7 @@ class PluginService:
         persona_id = await self._get_persona_id(event)
         if resp.completion_text:
             # 将消息发送到监控服务
-            asyncio.create_task(
+            self._create_monitored_task(
                 monitoring_service.add_message(sender="Bot", text=resp.completion_text)
             )
             await self.buffer_manager.add_bot_message(
@@ -229,7 +245,7 @@ class PluginService:
 
         task_description = f"正在刷新会话 {session_id} (人格: {persona_id}) 的缓冲区, 文本长度: {len(text)}"
         logger.info(f"[GraphMemory] {task_description}")
-        asyncio.create_task(monitoring_service.add_task(task_description))
+        self._create_monitored_task(monitoring_service.add_task(task_description))
         extracted_data = await self.extractor.extract(
             text_block=text, session_id=session_id
         )
@@ -282,6 +298,7 @@ class PluginService:
                     continue
 
                 summarize_interval = self.config.get("summarize_interval", 1800)
+                summarize_counter += check_interval
                 if summarize_counter >= summarize_interval:
                     summarize_counter = 0
                     await self._run_consolidation_cycle()

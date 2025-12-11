@@ -1,7 +1,7 @@
 import asyncio
 import json
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import WebSocket
 
@@ -46,7 +46,10 @@ class MonitoringService:
         断开一个 WebSocket 连接。
         """
         async with self.lock:
-            self.active_connections.remove(websocket)
+            try:
+                self.active_connections.remove(websocket)
+            except ValueError:
+                pass  # 连接可能已被其他协程移除
 
     async def _broadcast(self, data: dict):
         """
@@ -80,7 +83,7 @@ class MonitoringService:
         record = {
             "type": "log",
             "payload": {
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
                 "level": level,
                 "message": message,
             },
@@ -94,7 +97,7 @@ class MonitoringService:
         record = {
             "type": "task",
             "payload": {
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
                 "content": task_description,
             },
         }
@@ -107,7 +110,7 @@ class MonitoringService:
         record = {
             "type": "message",
             "payload": {
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
                 "sender": sender,
                 "text": text,
             },

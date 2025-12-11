@@ -202,10 +202,3 @@ def initialize_schema(conn, embedding_dim: int):
         logger.info("[GraphMemory Schema] 已创建关系表 'CONTAINS_ENTITY'。")
     except RuntimeError:
         pass  # 表已存在
-
-    # (Session)-[CONTAINS_ENTITY]->(Entity)
-    try:
-        conn.execute("CREATE REL TABLE CONTAINS_ENTITY(FROM Session TO Entity)")
-        logger.info("[GraphMemory Schema] 已创建关系表 'CONTAINS_ENTITY'。")
-    except RuntimeError:
-        pass  # 表已存在
