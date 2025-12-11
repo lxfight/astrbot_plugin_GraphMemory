@@ -124,5 +124,23 @@
         "description": "反思间隔 (秒)",
         "hint": "每隔多少秒执行一轮反思周期。",
         "default": 7200
+    },
+    "buffer_max_messages_private": {
+        "type": "int",
+        "description": "私聊缓冲区最大消息数",
+        "hint": "私聊会话缓冲区中存储的最大消息条数，达到后触发刷新。",
+        "default": 10
+    },
+    "buffer_max_messages_group": {
+        "type": "int",
+        "description": "群聊缓冲区最大消息数",
+        "hint": "群聊会话缓冲区中存储的最大消息条数，达到后触发刷新。",
+        "default": 20
+    },
+    "buffer_max_wait_seconds": {
+        "type": "int",
+        "description": "缓冲区最大等待时间 (秒)",
+        "hint": "消息在缓冲区中最长等待时间，超过后自动刷新。",
+        "default": 60
     }
 }

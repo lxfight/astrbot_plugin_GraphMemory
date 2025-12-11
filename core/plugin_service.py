@@ -85,6 +85,10 @@ class PluginService:
         self.enable_reflection = self.config.get("enable_reflection", False)
         # 反思周期间隔（秒）
         self.reflection_interval = self.config.get("reflection_interval", 7200)
+        # 缓冲区配置
+        self.buffer_max_messages_private = self.config.get("buffer_max_messages_private", 10)
+        self.buffer_max_messages_group = self.config.get("buffer_max_messages_group", 20)
+        self.buffer_max_wait_seconds = self.config.get("buffer_max_wait_seconds", 60)
 
         logger.debug(f"[GraphMemory] 插件数据路径: {plugin_data_path}")
 
@@ -96,8 +100,10 @@ class PluginService:
 
         self.buffer_manager = BufferManager(
             flush_callback=self._handle_buffer_flush,
-            max_size=20 if self.enable_group_learning else 10,
-            max_wait_seconds=60,
+            data_path=plugin_data_path,
+            max_size_private=self.buffer_max_messages_private,
+            max_size_group=self.buffer_max_messages_group,
+            max_wait_seconds=self.buffer_max_wait_seconds,
         )
         self.reflection_engine = ReflectionEngine(self)
 
