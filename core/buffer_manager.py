@@ -99,6 +99,15 @@ class BufferManager:
                     last_activity_time REAL NOT NULL
                 )
             """)
+
+            # --- Migration Logic ---
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(buffer_sessions)")
+            columns = [row[1] for row in cursor.fetchall()]
+            if "session_name" not in columns:
+                logger.info("[GraphMemory Buffer] 检测到旧版数据库，正在为 buffer_sessions 表添加 'session_name' 列...")
+                cursor.execute("ALTER TABLE buffer_sessions ADD COLUMN session_name TEXT")
+
             conn.commit()
 
     def _get_connection(self) -> sqlite3.Connection:
@@ -264,9 +273,9 @@ class BufferManager:
             lines.append(f"{prefix}: {row['content']}")
 
         text_block = "\n".join(lines)
-        session_name = session_info["session_name"] or ""
-        is_group = bool(session_info["is_group"])
-        persona_id = session_info["current_persona_id"] or "default"
+        session_name = session_info.get("session_name") or ""
+        is_group = bool(session_info.get("is_group", 0))
+        persona_id = session_info.get("current_persona_id") or "default"
 
         log_message = f"[GraphMemory Buffer] 正在刷新会话 {session_id} ({session_name}) 的 {len(lines)} 条消息 (人格: {persona_id})"
         logger.debug(log_message)
