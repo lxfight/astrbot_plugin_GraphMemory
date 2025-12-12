@@ -341,45 +341,50 @@ class PluginService:
     async def _extract_knowledge_from_intermediate(
         self, session_id: str, session_name: str, is_group: bool, summary_text: str
     ):
-        """从中期记忆中提取知识图谱信息。"""
+        """从中期记忆中提取知识图谱信息（实体和关系）。"""
         if not self.graph_engine or not self.extractor:
             return
 
         logger.info(f"[GraphMemory] 会话 {session_id}: 正在从中期记忆提取知识图谱...")
 
-        # 使用现有的extract方法，传入中期记忆作为文本
-        extracted_data = await self.extractor.extract(
-            text_block=summary_text,
-            session_id=session_id,
-            session_name=session_name,
-            is_group=is_group,
+        # 使用专门处理摘要文本的方法
+        extracted_knowledge = await self.extractor.extract_from_summary(
+            summary_text, provider_id=self.learning_model_id
         )
 
-        if not extracted_data:
+        if not extracted_knowledge:
             logger.debug(f"[GraphMemory] 会话 {session_id}: 未从中期记忆提取到结构化数据。")
             return
 
-        # 写入图数据库
-        tasks = [self.graph_engine.add_user(user) for user in extracted_data.users]
-        tasks.extend(
-            [self.graph_engine.add_session(session) for session in extracted_data.sessions]
+        # 确保 session 节点存在
+        from .graph_entities import SessionNode
+        session_node = SessionNode(
+            id=session_id, name=session_name, type="GROUP" if is_group else "PRIVATE"
         )
-        tasks.extend(
-            [self.graph_engine.add_entity(entity) for entity in extracted_data.entities]
-        )
-        await asyncio.gather(*tasks)
+        await self.graph_engine.add_session(session_node)
 
-        tasks = [self.graph_engine.add_message(message) for message in extracted_data.messages]
-        await asyncio.gather(*tasks)
+        # 第一步：写入所有实体（必须先完成，关系才能创建）
+        entity_tasks = [
+            self.graph_engine.add_entity(entity) for entity in extracted_knowledge.entities
+        ]
+        await asyncio.gather(*entity_tasks)
 
-        tasks = [self.graph_engine.add_relation(rel) for rel in extracted_data.relations]
-        tasks.extend(
-            [self.graph_engine.add_mention(mention) for mention in extracted_data.mentions]
-        )
-        await asyncio.gather(*tasks)
+        # 第二步：将实体关联到会话
+        link_tasks = [
+            self.graph_engine.link_entity_to_session(session_id, entity.name)
+            for entity in extracted_knowledge.entities
+        ]
+        await asyncio.gather(*link_tasks)
+
+        # 第三步：创建实体间的关系（此时实体已存在）
+        relation_tasks = [
+            self.graph_engine.add_relation(rel) for rel in extracted_knowledge.relations
+        ]
+        await asyncio.gather(*relation_tasks)
 
         logger.info(
-            f"[GraphMemory] 会话 {session_id}: 已从中期记忆提取并存储知识图谱数据。"
+            f"[GraphMemory] 会话 {session_id}: 已从中期记忆提取 {len(extracted_knowledge.entities)} 个实体, "
+            f"{len(extracted_knowledge.relations)} 条关系。"
         )
 
     async def _maintenance_loop(self):
@@ -492,10 +497,18 @@ class PluginService:
                 extracted_knowledge = await knowledge_extraction_task
                 if extracted_knowledge:
                     logger.info(f"[GraphMemory] 会话 {session_id}: 成功提取 {len(extracted_knowledge.entities)} 个实体和 {len(extracted_knowledge.relations)} 条关系。")
-                    # 将提取的知识存入图数据库
+                    # 第一步：写入所有实体（必须先完成，关系才能创建）
                     entity_tasks = [self.graph_engine.add_entity(e) for e in extracted_knowledge.entities]
+                    await asyncio.gather(*entity_tasks)
+                    # 第二步：将实体关联到会话
+                    link_tasks = [
+                        self.graph_engine.link_entity_to_session(session_id, e.name)
+                        for e in extracted_knowledge.entities
+                    ]
+                    await asyncio.gather(*link_tasks)
+                    # 第三步：创建实体间的关系
                     relation_tasks = [self.graph_engine.add_relation(r) for r in extracted_knowledge.relations]
-                    await asyncio.gather(*entity_tasks, *relation_tasks)
+                    await asyncio.gather(*relation_tasks)
                 else:
                     logger.info(f"[GraphMemory] 会话 {session_id}: 未从旧记忆中提取到新知识。")
 
