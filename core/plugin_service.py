@@ -193,6 +193,9 @@ class PluginService:
         """在 LLM 请求前注入相关记忆（包括中期记忆和图谱检索结果）。"""
         session_id = event.unified_msg_origin
         persona_id = await self._get_persona_id(event)
+        logger.debug(
+            f"[GraphMemory] 为会话 {session_id} 注入记忆 (人格: {persona_id})..."
+        )
 
         # === 注入中期记忆（模拟为对话） ===
         memories = self.buffer_manager.get_intermediate_memory_versions(
@@ -270,12 +273,13 @@ class PluginService:
     async def process_user_message(self, event: AstrMessageEvent):
         """处理用户消息，将其添加到缓冲区。"""
         persona_id = await self._get_persona_id(event)
-        logger.debug(f"[GraphMemory] 捕获用户消息事件2: {event}")
+        logger.debug(f"[GraphMemory] 捕获用户消息事件2: {event.message_str},{persona_id}")
         await self.buffer_manager.add_user_message(event, persona_id)
 
     async def process_bot_message(self, event: AstrMessageEvent, resp: LLMResponse):
         """处理机器人消息，将其添加到缓冲区。"""
         persona_id = await self._get_persona_id(event)
+        logger.debug(f"[GraphMemory] 捕获机器人消息事件2: {event.message_str},{persona_id}")
         if resp.completion_text:
             await self.buffer_manager.add_bot_message(
                 event, persona_id, content=resp.completion_text
