@@ -85,12 +85,20 @@ class PluginService:
         # 反思周期间隔（秒）
         self.reflection_interval = self.config.get("reflection_interval", 7200)
         # 缓冲区配置
-        self.buffer_max_messages_private = self.config.get("buffer_max_messages_private", 10)
-        self.buffer_max_messages_group = self.config.get("buffer_max_messages_group", 20)
+        self.buffer_max_messages_private = self.config.get(
+            "buffer_max_messages_private", 10
+        )
+        self.buffer_max_messages_group = self.config.get(
+            "buffer_max_messages_group", 20
+        )
         self.buffer_max_wait_seconds = self.config.get("buffer_max_wait_seconds", 60)
         # 中期记忆配置
-        self.intermediate_memory_max_versions = self.config.get("intermediate_memory_max_versions", 3)
-        self.intermediate_memory_inject_count = self.config.get("intermediate_memory_inject_count", 1)
+        self.intermediate_memory_max_versions = self.config.get(
+            "intermediate_memory_max_versions", 3
+        )
+        self.intermediate_memory_inject_count = self.config.get(
+            "intermediate_memory_inject_count", 1
+        )
 
         logger.debug(f"[GraphMemory] 插件数据路径: {plugin_data_path}")
 
@@ -195,10 +203,15 @@ class PluginService:
             # 按版本号升序（旧→新）注入
             for mem in reversed(memories):
                 if mem.get("summary_text"):
-                    memory_messages.extend([
-                        {"role": "user", "content": "请回忆一下我们之前聊过什么？"},
-                        {"role": "assistant", "content": f"好的，以下是之前对话的要点：\n{mem['summary_text']}"},
-                    ])
+                    memory_messages.extend(
+                        [
+                            {"role": "user", "content": "请回忆一下我们之前聊过什么？"},
+                            {
+                                "role": "assistant",
+                                "content": f"好的，以下是之前对话的要点：\n{mem['summary_text']}",
+                            },
+                        ]
+                    )
             if memory_messages:
                 logger.debug(
                     f"[GraphMemory] 为会话 {session_id} 注入 {len(memories)} 个中期记忆版本..."
@@ -229,7 +242,9 @@ class PluginService:
             if not query_to_embed:
                 return
 
-            query_embedding = await self.embedding_provider.get_embedding(query_to_embed)
+            query_embedding = await self.embedding_provider.get_embedding(
+                query_to_embed
+            )
             memory_text = await self.graph_engine.search(
                 query=query_to_embed,
                 query_embedding=query_embedding,
@@ -267,7 +282,12 @@ class PluginService:
             )
 
     async def _handle_buffer_flush(
-        self, session_id: str, session_name: str, text: str, is_group: bool, persona_id: str
+        self,
+        session_id: str,
+        session_name: str,
+        text: str,
+        is_group: bool,
+        persona_id: str,
     ):
         """
         处理缓冲区刷新事件，采用中期记忆策略：
@@ -288,7 +308,9 @@ class PluginService:
         )
 
         # 检查是否存在中期记忆
-        existing_memory = self.buffer_manager.get_intermediate_memory(session_id, persona_id)
+        existing_memory = self.buffer_manager.get_intermediate_memory(
+            session_id, persona_id
+        )
 
         if not existing_memory:
             # === 首次刷新：创建中期记忆，保存原始对话 ===
@@ -298,9 +320,11 @@ class PluginService:
             )
             if summary:
                 version = self.buffer_manager.add_intermediate_memory(
-                    session_id, persona_id, summary,
+                    session_id,
+                    persona_id,
+                    summary,
                     source_conversation=text,
-                    max_versions=self.intermediate_memory_max_versions
+                    max_versions=self.intermediate_memory_max_versions,
                 )
                 logger.info(
                     f"[GraphMemory] 会话 {session_id}: 中期记忆已创建 (版本: {version})。"
@@ -319,9 +343,11 @@ class PluginService:
             if self.graph_engine and source_conv:
                 self._create_monitored_task(
                     self._extract_knowledge_from_context(
-                        session_id, session_name, is_group,
+                        session_id,
+                        session_name,
+                        is_group,
                         intermediate_memory=old_summary,
-                        source_conversation=source_conv
+                        source_conversation=source_conv,
                     )
                 )
 
@@ -334,9 +360,11 @@ class PluginService:
 
             if new_summary:
                 version = self.buffer_manager.add_intermediate_memory(
-                    session_id, persona_id, new_summary,
+                    session_id,
+                    persona_id,
+                    new_summary,
                     source_conversation=text,
-                    max_versions=self.intermediate_memory_max_versions
+                    max_versions=self.intermediate_memory_max_versions,
                 )
                 logger.info(
                     f"[GraphMemory] 会话 {session_id}: 中期记忆已更新 (版本: {version})。"
@@ -345,8 +373,12 @@ class PluginService:
                 logger.warning(f"[GraphMemory] 会话 {session_id}: 中期记忆压缩失败。")
 
     async def _extract_knowledge_from_context(
-        self, session_id: str, session_name: str, is_group: bool,
-        intermediate_memory: str, source_conversation: str
+        self,
+        session_id: str,
+        session_name: str,
+        is_group: bool,
+        intermediate_memory: str,
+        source_conversation: str,
     ):
         """从中期记忆+原始对话中提取知识图谱信息（实体和关系）。
 
@@ -372,11 +404,14 @@ class PluginService:
         )
 
         if not extracted_knowledge:
-            logger.debug(f"[GraphMemory] 会话 {session_id}: 未从上下文提取到结构化数据。")
+            logger.debug(
+                f"[GraphMemory] 会话 {session_id}: 未从上下文提取到结构化数据。"
+            )
             return
 
         # 确保 session 节点存在
         from .graph_entities import SessionNode
+
         session_node = SessionNode(
             id=session_id, name=session_name, type="GROUP" if is_group else "PRIVATE"
         )
@@ -384,7 +419,8 @@ class PluginService:
 
         # 第一步：写入所有实体（必须先完成，关系才能创建）
         entity_tasks = [
-            self.graph_engine.add_entity(entity) for entity in extracted_knowledge.entities
+            self.graph_engine.add_entity(entity)
+            for entity in extracted_knowledge.entities
         ]
         await asyncio.gather(*entity_tasks)
 
@@ -484,7 +520,9 @@ class PluginService:
                 return
 
             # 获取最新的中期记忆
-            latest_memory = await self.graph_engine.get_latest_memory_fragment(session_id)
+            latest_memory = await self.graph_engine.get_latest_memory_fragment(
+                session_id
+            )
 
             knowledge_extraction_task = None
             if latest_memory and latest_memory.get("text"):
@@ -498,7 +536,9 @@ class PluginService:
 
             # 任务 B: 压缩记忆
             logger.info(f"[GraphMemory] 会话 {session_id}: 正在压缩新旧记忆。")
-            previous_summary = latest_memory["text"] if latest_memory else "这是对话的开始。"
+            previous_summary = (
+                latest_memory["text"] if latest_memory else "这是对话的开始。"
+            )
             new_summary = await self.extractor.compress_memory(
                 previous_summary=previous_summary,
                 new_events=new_events,
@@ -506,7 +546,9 @@ class PluginService:
             )
 
             if not new_summary:
-                logger.warning(f"[GraphMemory] 会话 {session_id}: 记忆压缩失败，跳过本轮巩固。")
+                logger.warning(
+                    f"[GraphMemory] 会话 {session_id}: 记忆压缩失败，跳过本轮巩固。"
+                )
                 if knowledge_extraction_task:
                     knowledge_extraction_task.cancel()
                 return
@@ -515,9 +557,14 @@ class PluginService:
             if knowledge_extraction_task:
                 extracted_knowledge = await knowledge_extraction_task
                 if extracted_knowledge:
-                    logger.info(f"[GraphMemory] 会话 {session_id}: 成功提取 {len(extracted_knowledge.entities)} 个实体和 {len(extracted_knowledge.relations)} 条关系。")
+                    logger.info(
+                        f"[GraphMemory] 会话 {session_id}: 成功提取 {len(extracted_knowledge.entities)} 个实体和 {len(extracted_knowledge.relations)} 条关系。"
+                    )
                     # 第一步：写入所有实体（必须先完成，关系才能创建）
-                    entity_tasks = [self.graph_engine.add_entity(e) for e in extracted_knowledge.entities]
+                    entity_tasks = [
+                        self.graph_engine.add_entity(e)
+                        for e in extracted_knowledge.entities
+                    ]
                     await asyncio.gather(*entity_tasks)
                     # 第二步：将实体关联到会话
                     link_tasks = [
@@ -526,10 +573,15 @@ class PluginService:
                     ]
                     await asyncio.gather(*link_tasks)
                     # 第三步：创建实体间的关系
-                    relation_tasks = [self.graph_engine.add_relation(r) for r in extracted_knowledge.relations]
+                    relation_tasks = [
+                        self.graph_engine.add_relation(r)
+                        for r in extracted_knowledge.relations
+                    ]
                     await asyncio.gather(*relation_tasks)
                 else:
-                    logger.info(f"[GraphMemory] 会话 {session_id}: 未从旧记忆中提取到新知识。")
+                    logger.info(
+                        f"[GraphMemory] 会话 {session_id}: 未从旧记忆中提取到新知识。"
+                    )
 
             # 存储新的记忆摘要并归档旧消息
             await self.graph_engine.consolidate_memory(
@@ -538,9 +590,7 @@ class PluginService:
             logger.info(f"[GraphMemory] 会话 {session_id}: 成功完成记忆巩固。")
 
         except Exception as e:
-            logger.error(
-                f"为会话 {session_id} 进行巩固时出错: {e}", exc_info=True
-            )
+            logger.error(f"为会话 {session_id} 进行巩固时出错: {e}", exc_info=True)
 
     async def _get_persona_id(self, event: AstrMessageEvent) -> str:
         """根据事件和配置确定当前应使用的 Persona ID。"""
@@ -555,10 +605,12 @@ class PluginService:
 
         try:
             # 使用官方推荐的方式获取当前会话的默认人格
-            default_persona = await self.context.persona_manager.get_default_persona_v3(umo)
-            if default_persona and default_persona.get("name"):
-                logger.info(f"[GraphMemory] 获取人格: {default_persona['name']}")
-                return default_persona["name"]
+            default_persona = await self.context.persona_manager.get_default_persona_v3(
+                umo
+            )
+            if default_persona:
+                logger.info(f"[GraphMemory] 获取人格: {default_persona.persona_id}")  # type: ignore
+                return default_persona.persona_id  # type: ignore
         except Exception as e:
             logger.warning(f"[GraphMemory] 获取人格时出错: {e}")
 
