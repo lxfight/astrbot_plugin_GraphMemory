@@ -10,7 +10,7 @@ from typing import Any
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
 
-from .entities import BufferedMessage
+from ..models import BufferedMessage
 
 # 刷新回调类型: (session_id, session_name, text, is_group, persona_id)
 FlushCallback = Callable[[str, str, str, bool, str], Coroutine[Any, Any, None]]

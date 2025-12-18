@@ -5,8 +5,8 @@ from typing import Any
 
 from astrbot.api import logger
 
-from .entities import EntityNode
-from .graph_store import GraphStore
+from ..models import EntityNode
+from ..storage import GraphStore
 
 # 检查 jieba 是否可用
 try:

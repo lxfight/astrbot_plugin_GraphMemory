@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.provider import LLMResponse, ProviderRequest
 from astrbot.api.star import Context, Star, StarTools, register
 
-from .core.command_handler import CommandHandler
+from .core.handlers import CommandHandler
 from .core.manager import GraphMemoryManager
 
 

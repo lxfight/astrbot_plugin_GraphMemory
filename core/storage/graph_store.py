@@ -11,13 +11,14 @@ import kuzu
 
 from astrbot.api import logger
 
-from .entities import (
+from ..models import (
     EntityNode,
     RelatedToRel,
     SessionNode,
     UserNode,
+    get_embedding_dim_from_provider,
+    initialize_schema,
 )
-from .schema import get_embedding_dim_from_provider, initialize_schema
 
 
 class GraphStore:

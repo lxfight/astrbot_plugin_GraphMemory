@@ -1,10 +1,11 @@
 """Function Calling 支持模块"""
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from astrbot.api import logger
 
-from .manager import GraphMemoryManager
+if TYPE_CHECKING:
+    from ..manager import GraphMemoryManager
 
 
 class FunctionCallingHandler:
@@ -13,7 +14,7 @@ class FunctionCallingHandler:
     负责处理 LLM 的主动记忆检索请求
     """
 
-    def __init__(self, manager: GraphMemoryManager):
+    def __init__(self, manager: "GraphMemoryManager"):
         self.manager = manager
 
     def get_tool_schema(self) -> dict:

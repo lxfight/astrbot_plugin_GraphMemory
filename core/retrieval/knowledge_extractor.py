@@ -7,8 +7,8 @@ from typing import Any
 from astrbot.api import logger
 from astrbot.api.star import Context
 
-from .entities import EntityNode, ExtractedKnowledge, RelatedToRel
-from .prompts import EXTRACTION_PROMPT, QUERY_REWRITING_PROMPT
+from ..models import EntityNode, ExtractedKnowledge, RelatedToRel
+from ..utils import EXTRACTION_PROMPT, QUERY_REWRITING_PROMPT
 
 
 class KnowledgeExtractor:

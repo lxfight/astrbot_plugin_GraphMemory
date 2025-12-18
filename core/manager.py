@@ -9,13 +9,11 @@ from astrbot.api.event import AstrMessageEvent
 from astrbot.api.provider import ProviderRequest
 from astrbot.api.star import Context
 
-from .entities import SessionNode
-from .entity_disambiguation import EntityDisambiguation
-from .function_calling import FunctionCallingHandler
-from .graph_store import GraphStore
-from .knowledge_extractor import KnowledgeExtractor
-from .memory_buffer import MemoryBuffer
-from .memory_retriever import MemoryRetriever
+from .handlers import CommandHandler
+from .models import SessionNode
+from .retrieval import KnowledgeExtractor, MemoryRetriever
+from .services import EntityDisambiguation, FunctionCallingHandler
+from .storage import GraphStore, MemoryBuffer
 
 
 class GraphMemoryManager:
