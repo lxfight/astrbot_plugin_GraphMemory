@@ -95,3 +95,16 @@ coverage_report.txt
 
 # Local data
 data/
+backup_v0.2.0_20251218_160518.tar.gz
+docs/00-设计总览.md
+docs/01-现有功能分析.md
+docs/02-AstrBot接口分析.md
+docs/03-新架构设计.md
+.gitignore
+docs/04-接口设计.md
+.gitignore
+docs/06-人格与记忆设计.md
+docs/更新说明.md
+docs/05-前端设计.md
+docs/开发完成总结.md
+docs/README.md

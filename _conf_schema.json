@@ -1,105 +1,59 @@
 {
+    "embedding_provider_id": {
+        "type": "string",
+        "description": "Embedding 模型 ID",
+        "hint": "必填，用于向量检索。这是实现 GraphRAG 检索的核心组件。",
+        "default": "",
+        "obvious_hint": true
+    },
+    "llm_provider_id": {
+        "type": "string",
+        "description": "知识提取模型 ID",
+        "hint": "用于知识提取和查询重写的 LLM Provider ID。如果留空，则使用当前会话的默认模型。",
+        "default": "",
+        "_special": "select_provider"
+    },
     "enable_group_learning": {
         "type": "bool",
         "description": "启用群聊学习",
         "hint": "若启用，机器人将从群聊中学习。否则，仅在私聊中学习。",
         "default": true
     },
-    "learning_model_id": {
-        "type": "string",
-        "description": "知识提取模型 ID",
-        "hint": "用于知识提取的 LLM Provider ID。如果留空，则使用当前会话的默认模型。",
-        "default": "",
-        "_special": "select_provider"
-    },
-    "embedding_provider_id": {
-        "type": "string",
-        "description": "Embedding 模型 ID",
-        "hint": "用于生成向量的 Embedding Provider ID。这是实现 GraphRAG 检索的核心，必须配置。",
-        "default": "",
-        "obvious_hint": true
-    },
-    "summarization_provider_id": {
-        "type": "string",
-        "description": "记忆摘要模型 ID",
-        "hint": "用于生成记忆摘要的 LLM Provider ID。如果留空，将使用 '知识提取模型' 的设置。",
-        "default": "",
-        "_special": "select_provider"
-    },
-    "enable_persona_isolation": {
-        "type": "bool",
-        "description": "启用人格记忆隔离",
-        "hint": "若启用，记忆将根据人格进行隔离。否则，所有记忆都存储在 'default' 人格下。",
-        "default": true
-    },
-    "persona_isolation_exceptions": {
-        "type": "list",
-        "description": "人格隔离例外名单",
-        "hint": "一个会话 ID (unified_msg_origin) 列表，其中的会话将反转人格隔离规则。",
-        "items": {
-            "type": "string"
-        },
-        "default": []
-    },
-    "max_global_nodes": {
+    "buffer_size_private": {
         "type": "int",
-        "description": "全局最大节点数",
-        "hint": "图谱中允许的最大节点数。当超过此限制时，最旧的 'Message' 节点将被修剪。",
-        "default": 10000
+        "description": "私聊缓冲区大小",
+        "hint": "私聊会话缓冲区中存储的最大消息条数，达到后触发知识提取。",
+        "default": 10
     },
-    "prune_interval": {
+    "buffer_size_group": {
         "type": "int",
-        "description": "修剪检查间隔 (秒)",
-        "hint": "每隔多少秒检查一次图谱是否需要修剪。",
-        "default": 3600
+        "description": "群聊缓冲区大小",
+        "hint": "群聊会话缓冲区中存储的最大消息条数，达到后触发知识提取。",
+        "default": 20
     },
-    "pruning_message_max_days": {
+    "buffer_timeout": {
         "type": "int",
-        "description": "原始消息最大保留天数",
-        "hint": "在清理阶段一，创建时间早于此天数的原始消息将被删除。",
-        "default": 90
-    },
-    "summarize_interval": {
-        "type": "int",
-        "description": "记忆摘要间隔 (秒)",
-        "hint": "每隔多少秒执行一轮记忆巩固（摘要）检查。",
+        "description": "缓冲区超时时间 (秒)",
+        "hint": "消息在缓冲区中最长等待时间，超过后自动触发知识提取。",
         "default": 1800
-    },
-    "consolidation_threshold": {
-        "type": "int",
-        "description": "记忆巩固阈值",
-        "hint": "当一个会话中未被摘要的消息数量超过此阈值时，触发记忆巩固。",
-        "default": 50
     },
     "enable_query_rewriting": {
         "type": "bool",
         "description": "启用查询重写",
-        "hint": "在进行记忆检索前，是否使用 LLM 将用户问题重写为一个独立的、包含上下文的问题。",
-        "default": true
+        "hint": "在进行记忆检索前，是否使用 LLM 将用户问题重写为一个独立的、包含上下文的问题，以提升检索准确性。",
+        "default": false
     },
-    "recall_vector_top_k": {
+    "retrieval_top_k": {
         "type": "int",
-        "description": "向量召回数量 (Top K)",
-        "hint": "在向量搜索中，每个节点类型（实体、消息、摘要）召回的最相似结果数量。",
-        "default": 5
-    },
-    "recall_keyword_top_k": {
-        "type": "int",
-        "description": "关键词召回数量 (Top K)",
-        "hint": "在关键词搜索中，召回的实体数量。",
-        "default": 3
-    },
-    "recall_max_items": {
-        "type": "int",
-        "description": "最终注入上下文项目数",
-        "hint": "经过排序后，最终格式化并注入到 Prompt 中的项目总数。",
+        "description": "检索结果数量",
+        "hint": "记忆检索时返回的最相关结果数量。数值越大，提供的上下文越丰富，但也可能引入噪音。",
         "default": 7
     },
-    "webui_host": {
-        "type": "string",
-        "description": "WebUI 访问地址",
-        "hint": "WebUI 的监听地址。",
-        "default": "0.0.0.0"
+    "enable_function_calling": {
+        "type": "bool",
+        "description": "启用主动记忆检索",
+        "hint": "将记忆检索注册为 Function Calling 工具，允许 LLM 主动决定何时检索记忆。需要 LLM 支持 Function Calling。",
+        "default": false
     },
     "webui_port": {
         "type": "int",
@@ -110,49 +64,25 @@
     "webui_key": {
         "type": "string",
         "description": "WebUI 访问密钥",
-        "hint": "用于访问 WebUI 的密钥。如果留空，将在启动时生成一个随机密钥。",
+        "hint": "用于访问 WebUI 的密钥。如果留空，将在启动时生成一个随机密钥并显示在日志中。",
         "default": ""
     },
-    "enable_reflection": {
-        "type": "bool",
-        "description": "启用 Agentic 反思",
-        "hint": "是否启用后台反思循环，用于事实修正和关系推断。需要消耗额外的 LLM token。",
-        "default": false
-    },
-    "reflection_interval": {
+    "prune_interval": {
         "type": "int",
-        "description": "反思间隔 (秒)",
-        "hint": "每隔多少秒执行一轮反思周期。",
-        "default": 7200
+        "description": "图谱维护间隔 (秒)",
+        "hint": "每隔多少秒执行一次图谱维护（时间衰减、清理低重要性实体）。",
+        "default": 3600
     },
-    "buffer_max_messages_private": {
-        "type": "int",
-        "description": "私聊缓冲区最大消息数",
-        "hint": "私聊会话缓冲区中存储的最大消息条数，达到后触发刷新。",
-        "default": 10
+    "time_decay_rate": {
+        "type": "number",
+        "description": "时间衰减率",
+        "hint": "每次维护时，实体重要性和关系强度的衰减率（0-1之间）。值越小，衰减越快。",
+        "default": 0.95
     },
-    "buffer_max_messages_group": {
-        "type": "int",
-        "description": "群聊缓冲区最大消息数",
-        "hint": "群聊会话缓冲区中存储的最大消息条数，达到后触发刷新。",
-        "default": 20
-    },
-    "buffer_max_wait_seconds": {
-        "type": "int",
-        "description": "缓冲区最大等待时间 (秒)",
-        "hint": "消息在缓冲区中最长等待时间，超过后自动刷新。",
-        "default": 180
-    },
-    "intermediate_memory_max_versions": {
-        "type": "int",
-        "description": "中期记忆最大版本数",
-        "hint": "保留的中期记忆历史版本数量，超出后自动淘汰最旧的版本。",
-        "default": 3
-    },
-    "intermediate_memory_inject_count": {
-        "type": "int",
-        "description": "中期记忆注入数量",
-        "hint": "LLM 请求时注入的中期记忆版本数量（1表示只注入最新版本）。",
-        "default": 1
+    "min_importance_threshold": {
+        "type": "number",
+        "description": "最小重要性阈值",
+        "hint": "实体重要性低于此阈值时，将在维护时被清理。",
+        "default": 0.1
     }
 }
