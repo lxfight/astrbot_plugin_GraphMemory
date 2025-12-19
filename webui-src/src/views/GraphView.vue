@@ -7,38 +7,49 @@
           <option value="global">全局视图</option>
           <option value="session">会话视图</option>
         </select>
-        <input
-          v-if="viewMode === 'session'"
-          v-model="sessionId"
-          type="text"
-          class="input"
-          placeholder="会话 ID"
-          style="width: 200px"
-        />
-        <button @click="loadGraph" class="btn" :disabled="loading">
-          {{ loading ? '加载中...' : '刷新' }}
+        <transition name="fade">
+          <input
+            v-if="viewMode === 'session'"
+            v-model="sessionId"
+            type="text"
+            class="input"
+            placeholder="输入会话 ID..."
+            style="width: 200px"
+          />
+        </transition>
+        <button @click="loadGraph" class="btn btn-primary" :disabled="loading">
+          <component :is="loading ? Loader2 : RefreshCw" :class="{ 'spin': loading }" :size="16" />
+          {{ loading ? '加载中' : '刷新' }}
         </button>
       </div>
     </div>
 
-    <div class="graph-container">
-      <div v-if="loading" class="loading">
-        <div class="spinner"></div>
-        <p>加载图谱数据...</p>
-      </div>
-      <div v-else-if="error" class="error">
-        <p>{{ error }}</p>
-        <button @click="loadGraph" class="btn">重试</button>
-      </div>
-      <GraphViewer
-        v-else-if="graphData.nodes.length > 0"
-        :nodes="graphData.nodes"
-        :edges="graphData.edges"
-      />
-      <div v-else class="empty">
-        <p>暂无图谱数据</p>
-        <p class="text-secondary">请先进行对话以生成记忆</p>
-      </div>
+    <div class="graph-container card">
+      <transition name="fade" mode="out-in">
+        <div v-if="loading" class="state-container">
+          <Loader2 class="spinner" :size="40" />
+          <p class="state-text">正在构建知识图谱...</p>
+        </div>
+        
+        <div v-else-if="error" class="state-container">
+          <AlertCircle class="error-icon" :size="40" />
+          <p class="error-text">{{ error }}</p>
+          <button @click="loadGraph" class="btn btn-primary">重试</button>
+        </div>
+        
+        <GraphViewer
+          v-else-if="graphData.nodes.length > 0"
+          :nodes="graphData.nodes"
+          :edges="graphData.edges"
+          :loading="loading"
+        />
+        
+        <div v-else class="state-container">
+          <Database class="empty-icon" :size="40" />
+          <p class="empty-title">暂无图谱数据</p>
+          <p class="empty-text">开始对话以生成记忆图谱</p>
+        </div>
+      </transition>
     </div>
   </div>
 </template>
@@ -47,6 +58,7 @@
 import { ref, onMounted } from 'vue'
 import { graphApi } from '@/api/graph'
 import GraphViewer from '@/components/GraphViewer.vue'
+import { Loader2, RefreshCw, AlertCircle, Database } from 'lucide-vue-next'
 
 const loading = ref(false)
 const error = ref('')
@@ -93,21 +105,45 @@ onMounted(() => {
   height: 100%;
   display: flex;
   flex-direction: column;
+  padding: 24px;
+  gap: 24px;
+}
+
+@media (max-width: 768px) {
+  .graph-view {
+    padding: 16px;
+    gap: 16px;
+  }
 }
 
 .view-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 24px;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-bg-primary);
+}
+
+@media (max-width: 768px) {
+  .view-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+  
+  .view-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  
+  .select, .input {
+    flex: 1;
+  }
 }
 
 .view-header h2 {
   font-size: 24px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--color-text-primary);
+  margin: 0;
 }
 
 .view-actions {
@@ -117,79 +153,80 @@ onMounted(() => {
 }
 
 .select {
-  padding: 8px 12px;
+  padding: 10px 14px;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background: var(--color-bg-primary);
   color: var(--color-text-primary);
   font-size: 14px;
   cursor: pointer;
-  transition: var(--transition);
+  transition: var(--transition-all);
 }
 
 .select:focus {
   outline: none;
   border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.1);
 }
 
 .graph-container {
   flex: 1;
   position: relative;
   overflow: hidden;
+  padding: 0; /* Override card padding for full graph */
+  display: flex;
+  flex-direction: column;
 }
 
-.loading,
-.error,
-.empty {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  text-align: center;
-}
-
-.loading {
+.state-container {
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 16px;
+  background: var(--color-bg-secondary);
 }
 
 .spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid var(--color-border);
-  border-top-color: var(--color-accent);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+  color: var(--color-info);
+  animation: spin 1s linear infinite;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
 }
 
 @keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+  to { transform: rotate(360deg); }
 }
 
-.loading p {
-  font-size: 14px;
+.state-text {
+  font-size: 15px;
   color: var(--color-text-secondary);
+  font-weight: 500;
 }
 
-.error {
+.error-icon {
   color: var(--color-error);
 }
 
-.error p {
-  margin-bottom: 16px;
-}
-
-.empty p {
-  font-size: 16px;
-  color: var(--color-text-primary);
+.error-text {
+  color: var(--color-error);
   margin-bottom: 8px;
 }
 
-.text-secondary {
+.empty-icon {
+  color: var(--color-text-tertiary);
+}
+
+.empty-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.empty-text {
   font-size: 14px;
   color: var(--color-text-secondary);
 }

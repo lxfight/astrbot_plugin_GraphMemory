@@ -16,11 +16,11 @@
         />
         <select v-model="typeFilter" class="select" @change="loadEntities">
           <option value="">所有类型</option>
-          <option value="PERSON">人物</option>
-          <option value="PLACE">地点</option>
-          <option value="THING">事物</option>
-          <option value="CONCEPT">概念</option>
-          <option value="EVENT">事件</option>
+          <option value="人物">人物</option>
+          <option value="地点">地点</option>
+          <option value="事物">事物</option>
+          <option value="概念">概念</option>
+          <option value="事件">事件</option>
         </select>
         <select v-model="sortBy" class="select" @change="loadEntities">
           <option value="importance">按重要性</option>
@@ -58,7 +58,7 @@
               </td>
               <td class="description">{{ entity.description }}</td>
               <td>
-                <div class="importance-bar">
+                <div class="importance-bar" :title="`重要性: ${entity.importance}`">
                   <div
                     class="importance-fill"
                     :style="{ width: `${entity.importance * 100}%` }"
@@ -70,20 +70,14 @@
               <td>
                 <div class="actions">
                   <button @click="viewEntity(entity)" class="btn-action" title="查看详情">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                      <circle cx="12" cy="12" r="3"/>
-                    </svg>
+                    <Eye :size="16" />
                   </button>
                   <button
                     @click="deleteEntity(entity)"
                     class="btn-action btn-danger"
                     title="删除"
                   >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <polyline points="3 6 5 6 21 6"/>
-                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                    </svg>
+                    <Trash2 :size="16" />
                   </button>
                 </div>
               </td>
@@ -195,6 +189,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { entityApi } from '@/api/entities'
+import { Eye, Trash2 } from 'lucide-vue-next'
 
 const loading = ref(false)
 const error = ref('')
@@ -362,6 +357,32 @@ onMounted(() => {
   border-radius: var(--radius-md);
 }
 
+@media (max-width: 768px) {
+  .filters {
+    flex-direction: column;
+  }
+  
+  .filters .input {
+    max-width: 100%;
+  }
+
+  .entities-view {
+    padding: 16px;
+  }
+  
+  /* 移动端表格优化：保持水平滚动 */
+  .table-container {
+    margin: 0 -16px; /* 负边距抵消 padding */
+    border-left: none;
+    border-right: none;
+    border-radius: 0;
+  }
+  
+  .table th, .table td {
+    white-space: nowrap; /* 强制不换行 */
+  }
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;
@@ -461,20 +482,34 @@ onMounted(() => {
 }
 
 .btn-action {
-  padding: 4px 8px;
-  border: none;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid transparent;
   background: transparent;
   cursor: pointer;
-  font-size: 16px;
-  transition: var(--transition);
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-sm);
+  transition: var(--transition-all);
 }
 
 .btn-action:hover {
-  transform: scale(1.2);
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-border);
+}
+
+.btn-danger {
+  color: var(--color-text-secondary);
 }
 
 .btn-danger:hover {
-  filter: brightness(1.2);
+  color: var(--color-error);
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.2);
 }
 
 .pagination {

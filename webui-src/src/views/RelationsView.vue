@@ -58,7 +58,7 @@
               <td class="relation-type">{{ rel.relation }}</td>
               <td class="entity-name">{{ rel.to }}</td>
               <td>
-                <div class="strength-bar">
+                <div class="strength-bar" :title="`关联强度: ${rel.strength}`">
                   <div
                     class="strength-fill"
                     :style="{ width: `${rel.strength * 100}%` }"
@@ -74,10 +74,7 @@
                   class="btn-action btn-danger"
                   title="删除"
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <polyline points="3 6 5 6 21 6"/>
-                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                  </svg>
+                  <Trash2 :size="16" />
                 </button>
               </td>
             </tr>
@@ -112,6 +109,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { relationApi } from '@/api/relations'
+import { Trash2 } from 'lucide-vue-next'
 
 const loading = ref(false)
 const error = ref('')
@@ -261,6 +259,32 @@ onMounted(() => {
   border-radius: var(--radius-md);
 }
 
+@media (max-width: 768px) {
+  .filters {
+    flex-direction: column;
+  }
+  
+  .filters .input {
+    max-width: 100%;
+  }
+
+  .relations-view {
+    padding: 16px;
+  }
+  
+  /* 移动端表格优化：保持水平滚动 */
+  .table-container {
+    margin: 0 -16px; /* 负边距抵消 padding */
+    border-left: none;
+    border-right: none;
+    border-radius: 0;
+  }
+  
+  .table th, .table td {
+    white-space: nowrap; /* 强制不换行 */
+  }
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;
@@ -347,16 +371,34 @@ onMounted(() => {
 }
 
 .btn-action {
-  padding: 4px 8px;
-  border: none;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid transparent;
   background: transparent;
   cursor: pointer;
-  font-size: 16px;
-  transition: var(--transition);
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-sm);
+  transition: var(--transition-all);
 }
 
 .btn-action:hover {
-  transform: scale(1.2);
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-border);
+}
+
+.btn-danger {
+  color: var(--color-text-secondary);
+}
+
+.btn-danger:hover {
+  color: var(--color-error);
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.2);
 }
 
 .pagination {
