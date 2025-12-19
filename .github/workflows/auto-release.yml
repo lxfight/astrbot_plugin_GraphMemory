@@ -66,31 +66,30 @@ jobs:
 
             # 如果还是空的，使用默认内容
             if [ -z "$NOTES" ]; then
-              NOTES="版本 $NEW_VERSION 已发布。
-
-详细更新内容请查看 [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md)。"
+              NOTES="版本 $NEW_VERSION 已发布。详细更新内容请查看 [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md)。"
             fi
           else
             NOTES="版本 $NEW_VERSION 已发布。"
           fi
 
-          # 添加自动生成标记
-          FULL_NOTES="$NOTES
-
----
-
-🤖 此 Release 由 GitHub Actions 自动生成
-📅 发布时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
-📦 构建分支: ${{ github.ref_name }}
-🔗 提交: ${{ github.sha }}"
-
-          # 保存到文件（多行内容）
-          echo "$FULL_NOTES" > /tmp/release_notes.md
+          # 添加自动生成标记并保存到文件
+          {
+            echo "$NOTES"
+            echo ""
+            echo "---"
+            echo ""
+            echo "🤖 此 Release 由 GitHub Actions 自动生成"
+            echo "📅 发布时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo "📦 构建分支: ${{ github.ref_name }}"
+            echo "🔗 提交: ${{ github.sha }}"
+          } > /tmp/release_notes.md
 
           # 输出到 GITHUB_OUTPUT（使用 heredoc）
-          echo 'notes<<EOF' >> $GITHUB_OUTPUT
-          cat /tmp/release_notes.md >> $GITHUB_OUTPUT
-          echo 'EOF' >> $GITHUB_OUTPUT
+          {
+            echo 'notes<<EOF'
+            cat /tmp/release_notes.md
+            echo 'EOF'
+          } >> $GITHUB_OUTPUT
 
           echo "✅ 提取到更新日志"
 
