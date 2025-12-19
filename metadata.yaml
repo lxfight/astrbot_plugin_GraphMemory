@@ -1,5 +1,5 @@
 name: astrbot_plugin_GraphMemory
 author: lxfight
-version: 0.5.1
+version: 0.5.2
 description: 基于图数据库的长期记忆插件，支持知识提取、记忆检索、人格分层共享和记忆管理。
 repo: https://github.com/lxfight/astrbot_plugin_GraphMemory
