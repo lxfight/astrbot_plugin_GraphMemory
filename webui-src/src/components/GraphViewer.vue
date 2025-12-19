@@ -31,16 +31,28 @@
     <!-- 控制面板 -->
     <div class="controls">
       <button @click="fitGraph" class="btn btn-sm" title="适应画布">
-        <span>⊡</span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+        </svg>
       </button>
       <button @click="changeLayout('cose')" class="btn btn-sm" title="力导向布局">
-        <span>◉</span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>
       </button>
       <button @click="changeLayout('circle')" class="btn btn-sm" title="环形布局">
-        <span>○</span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+        </svg>
       </button>
       <button @click="changeLayout('grid')" class="btn btn-sm" title="网格布局">
-        <span>⊞</span>
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="7" height="7"/>
+          <rect x="14" y="3" width="7" height="7"/>
+          <rect x="14" y="14" width="7" height="7"/>
+          <rect x="3" y="14" width="7" height="7"/>
+        </svg>
       </button>
     </div>
   </div>
@@ -76,14 +88,21 @@ const cyContainer = ref<HTMLElement>()
 let cy: Core | null = null
 const selectedNode = ref<GraphNode | null>(null)
 
-// 实体类型颜色映射
+// 实体类型颜色映射（浅色系，柔和配色）
 const typeColors: Record<string, string> = {
-  PERSON: '#3b82f6',
-  PLACE: '#10b981',
-  THING: '#f59e0b',
-  CONCEPT: '#8b5cf6',
-  EVENT: '#ef4444',
-  default: '#6b7280',
+  // 英文
+  PERSON: '#60a5fa',    // 浅蓝色
+  PLACE: '#34d399',     // 浅绿色
+  THING: '#fbbf24',     // 浅黄色
+  CONCEPT: '#a78bfa',   // 浅紫色
+  EVENT: '#f87171',     // 浅红色
+  // 中文
+  '人物': '#60a5fa',
+  '地点': '#34d399',
+  '事物': '#fbbf24',
+  '概念': '#a78bfa',
+  '事件': '#f87171',
+  default: '#94a3b8',   // 浅灰色
 }
 
 // 获取实体类型颜色
@@ -93,7 +112,15 @@ const getNodeColor = (type: string): string => {
 
 // 初始化 Cytoscape
 const initCytoscape = () => {
-  if (!cyContainer.value) return
+  if (!cyContainer.value) {
+    console.error('[GraphViewer] 容器元素未找到')
+    return
+  }
+
+  console.log('[GraphViewer] 初始化 Cytoscape, 容器尺寸:', {
+    width: cyContainer.value.clientWidth,
+    height: cyContainer.value.clientHeight,
+  })
 
   cy = cytoscape({
     container: cyContainer.value,
@@ -166,6 +193,11 @@ const initCytoscape = () => {
 const updateGraph = () => {
   if (!cy) return
 
+  console.log('[GraphViewer] 更新图谱数据:', {
+    nodes: props.nodes.length,
+    edges: props.edges.length,
+  })
+
   // 转换节点数据
   const cyNodes = props.nodes.map((node) => {
     const importance = node.properties.importance || 0.5
@@ -197,6 +229,11 @@ const updateGraph = () => {
         width,
       },
     }
+  })
+
+  console.log('[GraphViewer] 转换后的数据:', {
+    cyNodes: cyNodes.length,
+    cyEdges: cyEdges.length,
   })
 
   // 更新图谱
@@ -233,8 +270,11 @@ const changeLayout = (layoutName: string) => {
 watch(() => [props.nodes, props.edges], updateGraph, { deep: true })
 
 onMounted(() => {
-  initCytoscape()
-  updateGraph()
+  // 延迟初始化，确保DOM完全渲染
+  setTimeout(() => {
+    initCytoscape()
+    updateGraph()
+  }, 100)
 })
 
 onUnmounted(() => {

@@ -31,8 +31,13 @@ class GraphStore:
     """
 
     def __init__(self, db_path: Path, embedding_provider: Any | None = None):
-        self.db_path = db_path / "kuzu_db_v3"
-        # 只创建父目录，让 KuzuDB 自己创建数据库目录
+        # 如果路径已经以 kuzu_db_v3 结尾，直接使用；否则添加
+        if db_path.name == "kuzu_db_v3":
+            self.db_path = db_path
+        else:
+            self.db_path = db_path / "kuzu_db_v3"
+
+        # 创建父目录
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
         self.embedding_provider = embedding_provider

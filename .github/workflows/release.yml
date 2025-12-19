@@ -1,0 +1,85 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag'
+        required: true
+        type: string
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: webui-src/package-lock.json
+
+      - name: Install dependencies
+        working-directory: webui-src
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: webui-src
+        run: npm run build
+
+      - name: Check build output
+        run: |
+          echo "Build output:"
+          ls -lh webui/static/
+          echo ""
+          echo "Assets:"
+          ls -lh webui/static/assets/
+
+      - name: Create release archive
+        run: |
+          # 创建发布目录
+          mkdir -p release
+
+          # 复制所有文件（排除不需要的）
+          rsync -av --progress . release/astrbot_plugin_GraphMemory \
+            --exclude .git \
+            --exclude .github \
+            --exclude webui-src/node_modules \
+            --exclude webui-src/dist \
+            --exclude __pycache__ \
+            --exclude '*.pyc' \
+            --exclude data \
+            --exclude .vscode \
+            --exclude .idea \
+            --exclude release
+
+          # 打包
+          cd release
+          tar -czf astrbot_plugin_GraphMemory.tar.gz astrbot_plugin_GraphMemory
+          zip -r astrbot_plugin_GraphMemory.zip astrbot_plugin_GraphMemory
+
+          echo "Archive created:"
+          ls -lh
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v1
+        if: github.event_name == 'release'
+        with:
+          files: |
+            release/astrbot_plugin_GraphMemory.tar.gz
+            release/astrbot_plugin_GraphMemory.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-packages
+          path: release/
+          retention-days: 90

@@ -1,0 +1,55 @@
+name: Build Frontend
+
+on:
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - 'webui-src/**'
+      - '.github/workflows/build-frontend.yml'
+  pull_request:
+    branches:
+      - master
+      - main
+    paths:
+      - 'webui-src/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: webui-src/package-lock.json
+
+      - name: Install dependencies
+        working-directory: webui-src
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: webui-src
+        run: npm run build
+
+      - name: Check build output
+        run: |
+          echo "Build output:"
+          ls -lh webui/static/
+          echo ""
+          echo "Assets:"
+          ls -lh webui/static/assets/ | head -20
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: webui-static-${{ github.sha }}
+          path: webui/static/
+          retention-days: 30

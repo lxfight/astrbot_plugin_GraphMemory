@@ -12,6 +12,17 @@ export default defineConfig({
   build: {
     outDir: '../webui/static',
     emptyOutDir: true,
+    chunkSizeWarningLimit: 1500,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-vue': ['vue', 'vue-router', 'pinia'],
+          'vendor-charts': ['echarts'],
+          'vendor-graph': ['cytoscape'],
+          'vendor-utils': ['axios'],
+        },
+      },
+    },
   },
   server: {
     proxy: {
