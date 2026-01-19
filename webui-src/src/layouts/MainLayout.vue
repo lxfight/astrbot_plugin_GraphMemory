@@ -163,7 +163,23 @@ const handleLogout = () => {
   flex-direction: column;
   transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   z-index: 50;
-  box-shadow: var(--shadow-md);
+  position: relative;
+}
+
+.sidebar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 1px;
+  background: linear-gradient(to bottom, var(--color-accent-light), transparent, var(--color-accent-light));
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.sidebar:hover::after {
+  opacity: 0.5;
 }
 
 .sidebar-collapsed {
@@ -195,14 +211,19 @@ const handleLogout = () => {
 }
 
 .logo-icon {
-  color: var(--color-info);
+  color: var(--color-accent);
   flex-shrink: 0;
+  filter: drop-shadow(0 2px 4px var(--color-accent-light));
 }
 
 .logo-text {
   font-size: 18px;
   font-weight: 700;
   color: var(--color-text-primary);
+  background: var(--color-accent-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .toggle-btn {
@@ -239,19 +260,33 @@ const handleLogout = () => {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px;
+  padding: 12px 14px;
   border-radius: var(--radius-md);
   color: var(--color-text-secondary);
   text-decoration: none;
   font-size: 14px;
   font-weight: 500;
-  transition: all 0.2s;
+  transition: all 0.2s ease;
   white-space: nowrap;
   overflow: hidden;
   background: transparent;
   border: none;
   cursor: pointer;
   width: 100%;
+  position: relative;
+}
+
+.nav-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%) scaleY(0);
+  width: 3px;
+  height: 24px;
+  background: var(--color-accent-gradient);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  transition: transform 0.2s ease;
 }
 
 .nav-item:hover {
@@ -260,9 +295,13 @@ const handleLogout = () => {
 }
 
 .nav-item.router-link-active {
-  background: var(--color-bg-tertiary);
-  color: var(--color-info);
+  background: var(--color-accent-light);
+  color: var(--color-accent);
   font-weight: 600;
+}
+
+.nav-item.router-link-active::before {
+  transform: translateY(-50%) scaleY(1);
 }
 
 .nav-item :deep(svg) {
@@ -280,16 +319,23 @@ const handleLogout = () => {
 
 .logout-btn:hover {
   color: var(--color-error);
-  background: rgba(239, 68, 68, 0.1);
+  background: var(--color-error-light);
+}
+
+.theme-btn:hover {
+  color: var(--color-warning);
+  background: var(--color-warning-light);
 }
 
 .author-info {
-  margin-top: 12px;
-  padding: 8px 12px;
+  margin-top: 16px;
+  padding: 12px;
   font-size: 11px;
   color: var(--color-text-tertiary);
   border-top: 1px solid var(--color-border);
   text-align: center;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
 }
 
 .author-info p {

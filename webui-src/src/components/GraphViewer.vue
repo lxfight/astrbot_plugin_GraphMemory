@@ -137,21 +137,21 @@ let cy: Core | null = null
 const selectedNode = ref<GraphNode | null>(null)
 const currentLayout = ref('cose')
 
-// 实体类型颜色映射（明亮莫兰迪配色）
+// 实体类型颜色映射（现代渐变配色）
 const typeColors: Record<string, string> = {
   // 英文
-  PERSON: '#7EC8E3',    // 天蓝
-  PLACE: '#9BD49C',     // 草绿
-  THING: '#F4C87F',     // 杏黄
-  CONCEPT: '#D4A5D4',   // 浅紫
-  EVENT: '#F5A9A3',     // 珊瑚粉
+  PERSON: '#6366f1',    // 靛蓝
+  PLACE: '#10b981',     // 翠绿
+  THING: '#f59e0b',     // 琥珀
+  CONCEPT: '#8b5cf6',   // 紫罗兰
+  EVENT: '#ec4899',     // 粉红
   // 中文
-  '人物': '#7EC8E3',
-  '地点': '#9BD49C',
-  '事物': '#F4C87F',
-  '概念': '#D4A5D4',
-  '事件': '#F5A9A3',
-  default: '#B0BEC5',   // 蓝灰
+  '人物': '#6366f1',
+  '地点': '#10b981',
+  '事物': '#f59e0b',
+  '概念': '#8b5cf6',
+  '事件': '#ec4899',
+  default: '#64748b',   // 石板灰
 }
 
 const visibleTypeColors = computed(() => {
@@ -193,41 +193,47 @@ const initCytoscape = () => {
         selector: 'node',
         style: {
           'background-color': 'data(color)',
-          'background-opacity': 0.6,
-          'border-width': 3,
+          'background-opacity': 0.85,
+          'border-width': 2,
           'border-color': 'data(color)',
-          'border-opacity': 0.9,
+          'border-opacity': 1,
           'label': 'data(label)',
           'width': 'data(size)',
           'height': 'data(size)',
-          'font-size': '11px',
-          'font-weight': '600',
-          'text-valign': 'bottom',
-          'text-margin-y': 8,
-          'color': isDark ? '#e2e8f0' : '#1f2937',
+          // 标签样式优化 - 防止重叠
+          'font-size': '10px',
+          'font-weight': '500',
+          'text-valign': 'center',
+          'text-halign': 'center',
+          'text-wrap': 'ellipsis',
+          'text-max-width': '60px',
+          'text-overflow-wrap': 'anywhere',
+          'color': '#ffffff',
+          'text-outline-color': 'data(color)',
+          'text-outline-width': 2,
+          'text-outline-opacity': 0.8,
           // 添加阴影效果
-          'shadow-blur': 10,
+          'shadow-blur': 8,
           'shadow-color': 'data(color)',
-          'shadow-opacity': 0.3,
+          'shadow-opacity': 0.4,
           'shadow-offset-x': 0,
           'shadow-offset-y': 2,
           // 平滑过渡
-          'transition-property': 'background-opacity, border-width, width, height, font-size, shadow-blur, shadow-opacity',
-          'transition-duration': 400,
+          'transition-property': 'background-opacity, border-width, width, height, shadow-blur, shadow-opacity',
+          'transition-duration': 300,
           'transition-timing-function': 'ease-out',
         } as any,
       },
       {
         selector: 'node:hover',
         style: {
-          'background-opacity': 0.75,
-          'border-width': 4,
-          'font-size': '12px',
+          'background-opacity': 0.95,
+          'border-width': 3,
           'z-index': 999,
-          'shadow-blur': 20,
-          'shadow-opacity': 0.5,
-          'width': (ele: NodeSingular) => (ele.data('size') || 40) * 1.1,
-          'height': (ele: NodeSingular) => (ele.data('size') || 40) * 1.1,
+          'shadow-blur': 15,
+          'shadow-opacity': 0.6,
+          'width': (ele: NodeSingular) => (ele.data('size') || 40) * 1.15,
+          'height': (ele: NodeSingular) => (ele.data('size') || 40) * 1.15,
         } as any,
       },
       {
@@ -238,26 +244,33 @@ const initCytoscape = () => {
           'target-arrow-color': isDark ? '#475569' : '#cbd5e1',
           'target-arrow-shape': 'triangle',
           'curve-style': 'bezier',
-          'arrow-scale': 1,
-          'opacity': 0.5,
-          'label': 'data(label)',
-          'font-size': '11px',
-          'color': isDark ? '#94a3b8' : '#475569',
+          'arrow-scale': 0.8,
+          'opacity': 0.4,
+          // 边标签默认隐藏，减少视觉噪音
+          'label': '',
+          'font-size': '9px',
+          'color': isDark ? '#94a3b8' : '#64748b',
           'text-rotation': 'autorotate',
+          'text-background-color': isDark ? '#1e293b' : '#ffffff',
+          'text-background-opacity': 0.9,
+          'text-background-padding': '3px',
+          'text-background-shape': 'roundrectangle',
           // 边的过渡效果
           'transition-property': 'line-color, target-arrow-color, width, opacity',
-          'transition-duration': 300,
+          'transition-duration': 200,
           'transition-timing-function': 'ease-in-out',
         } as any,
       },
       {
         selector: 'edge:hover',
         style: {
-          'width': (ele: any) => (ele.data('width') || 2) * 1.5,
-          'opacity': 0.8,
-          'line-color': isDark ? '#64748b' : '#94a3b8',
-          'target-arrow-color': isDark ? '#64748b' : '#94a3b8',
+          'width': (ele: any) => (ele.data('width') || 2) * 1.8,
+          'opacity': 0.9,
+          'line-color': isDark ? '#818cf8' : '#6366f1',
+          'target-arrow-color': isDark ? '#818cf8' : '#6366f1',
           'z-index': 100,
+          // 悬停时显示边标签
+          'label': 'data(label)',
         } as any,
       },
       {
@@ -393,14 +406,19 @@ const updateGraph = async () => {
     // 转换节点
     const cyNodes = props.nodes.map((node) => {
       const importance = node.properties.importance || 0.5
-      // 减小节点基础尺寸，从 30-60px 调整为 20-40px
-      const size = 20 + importance * 20
+      // 节点尺寸：基础 28px，重要性加成最多 22px，范围 28-50px
+      const size = 28 + importance * 22
       const color = getNodeColor(node.properties.type)
+      // 截断过长的名称
+      const label = node.properties.name.length > 8 
+        ? node.properties.name.substring(0, 7) + '…' 
+        : node.properties.name
 
       return {
         data: {
           id: node.id,
-          label: node.properties.name,
+          label,
+          fullLabel: node.properties.name,
           color,
           size,
           properties: node.properties,
@@ -475,22 +493,22 @@ const runLayout = () => {
       animationDuration: 800,
       animationEasing: 'ease-out',
 
-      // 力导向参数
-      nodeSeparation: 100,
-      idealEdgeLength: 100,
-      edgeElasticity: 0.45,
+      // 力导向参数 - 增加间距防止重叠
+      nodeSeparation: 150,
+      idealEdgeLength: 150,
+      edgeElasticity: 0.35,
       nestingFactor: 0.1,
-      gravity: 0.25,
-      numIter: 2500,
+      gravity: 0.15,
+      numIter: 3000,
 
       // 初始温度和冷却
       initialEnergyOnIncremental: 0.3,
       gravityRangeCompound: 1.5,
       gravityCompound: 1.0,
-      gravityRange: 3.8,
+      gravityRange: 4.0,
 
-      // 避免重叠
-      nodeRepulsion: 4500,
+      // 避免重叠 - 增强排斥力
+      nodeRepulsion: 8000,
 
       fit: true,
       padding: 50,

@@ -1,0 +1,16 @@
+import{d as k,r as n,h as c,i as e,j as i,u as o,k as h,l as _,v as b,m as w,T as x,b as p,n as u,t as m,p as L,f as l,q as M}from"./vendor-vue-BVRAD2HG.js";import{s as V}from"./stats-BSkFCfwg.js";import{B as z}from"./brain-D2EdEeiv.js";import{c as d}from"./createLucideIcon-B0lsOQ7f.js";import{L as B}from"./loader-circle-Cc_M7cjW.js";import{C}from"./circle-alert-DGMod5Pw.js";import{_ as I}from"./_plugin-vue_export-helper-DlAUqK2U.js";import"./client-CMhDoEMr.js";import"./vendor-utils-B9ygI19o.js";/**
+ * @license lucide-vue-next v0.562.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */const N=d("info",[["circle",{cx:"12",cy:"12",r:"10",key:"1mglay"}],["path",{d:"M12 16v-4",key:"1dtifu"}],["path",{d:"M12 8h.01",key:"e9boi3"}]]);/**
+ * @license lucide-vue-next v0.562.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */const S=d("key",[["path",{d:"m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4",key:"g0fldk"}],["path",{d:"m21 2-9.6 9.6",key:"1j0ho8"}],["circle",{cx:"7.5",cy:"15.5",r:"5.5",key:"yqb3hr"}]]);/**
+ * @license lucide-vue-next v0.562.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */const T=d("log-in",[["path",{d:"m10 17 5-5-5-5",key:"1bsop3"}],["path",{d:"M15 12H3",key:"6jk70r"}],["path",{d:"M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4",key:"u53s6r"}]]),j={class:"login-container"},q={class:"login-card"},A={class:"login-header"},D={class:"logo-wrapper"},E={class:"form-group"},G={class:"input-wrapper"},H={key:0,class:"error-message"},K=["disabled"],O={class:"login-footer"},R={class:"hint"},U=k({__name:"LoginView",setup(F){const v=L(),r=n(""),t=n(""),a=n(!1),y=async()=>{if(!r.value.trim()){t.value="请输入访问密钥";return}a.value=!0,t.value="";try{localStorage.setItem("webui_key",r.value),await V.getOverview(),v.push("/")}catch{localStorage.removeItem("webui_key"),t.value="访问密钥无效"}finally{a.value=!1}};return(f,s)=>(l(),c("div",j,[s[5]||(s[5]=e("div",{class:"login-background"},[e("div",{class:"gradient-orb orb-1"}),e("div",{class:"gradient-orb orb-2"}),e("div",{class:"gradient-orb orb-3"})],-1)),e("div",q,[e("div",A,[e("div",D,[i(o(z),{class:"logo-icon",size:48})]),s[1]||(s[1]=e("h1",null,"GraphMemory",-1)),s[2]||(s[2]=e("p",null,"图谱记忆可视化管理界面",-1))]),e("form",{onSubmit:h(y,["prevent"]),class:"login-form"},[e("div",E,[s[3]||(s[3]=e("label",{for:"key"},"访问密钥",-1)),e("div",G,[i(o(S),{class:"input-icon",size:18}),_(e("input",{id:"key","onUpdate:modelValue":s[0]||(s[0]=g=>r.value=g),type:"password",class:"input input-with-icon",placeholder:"请输入访问密钥",required:""},null,512),[[b,r.value]])])]),i(x,{name:"slide-up"},{default:w(()=>[t.value?(l(),c("div",H,[i(o(C),{size:16}),u(" "+m(t.value),1)])):M("",!0)]),_:1}),e("button",{type:"submit",class:"btn btn-primary btn-block",disabled:a.value},[a.value?(l(),p(o(B),{key:0,class:"animate-spin",size:18})):(l(),p(o(T),{key:1,size:18})),u(" "+m(a.value?"验证中...":"登录"),1)],8,K)],32),e("div",O,[e("div",R,[i(o(N),{size:14}),s[4]||(s[4]=e("p",null,"访问密钥在插件启动日志中",-1))])])])]))}}),se=I(U,[["__scopeId","data-v-5ea34742"]]);export{se as default};
